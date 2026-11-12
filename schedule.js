@@ -126,17 +126,20 @@
 
   // ---- forecast -----------------------------------------------------------------------------
   // anchor: {kind:'at', i, since}, {kind:'leg', i, frac}, {kind:'off', i, walk}, {kind:'start'}
-  // opt: {now, skips:Set of stop ids}
+  // opt: {now, skips: Set of stop ids, visited: Set of stop ids}
   function forecast(day, anchor, opt) {
-    const S = day.stops, now = opt.now, skips = opt.skips || new Set();
+    const S = day.stops, now = opt.now, skips = opt.skips || new Set(), visited = opt.visited || new Set();
+    // a stop you marked as visited but that is still ahead (you went there out of order) is not
+    // walked to or stayed at again: it counts like a skipped one, flagged `visited`
+    const gone = id => skips.has(id) || visited.has(id);
     const rows = new Array(S.length).fill(null);
     let t, from;
 
     const step = (k, arrive) => {           // arrive at stop k at time `arrive`; returns departure
       const s = S[k], plan = toMin(s.arrive), r = { k, eta: arrive, plan, delay: arrive - plan };
       let tt = arrive;
-      if (skips.has(s.id)) {
-        r.skipped = true;
+      if (gone(s.id)) {
+        if (visited.has(s.id)) r.visited = true; else r.skipped = true;
         tt -= s.skip_walk_min || 0;             // the shortcut prev -> next
       } else {
         const h = parseHours(s.hours);
@@ -167,7 +170,7 @@
       if (h && h.open != null && dep < h.open && s.stay > 0) { r.wait = h.open - dep; dep = h.open; }
       if (s.fixed) { const f = toMin(s.fixed); r.fixed = f; r.slack = f - since; if (dep < f) dep = f; }
       if (h && h.close != null && since >= h.close) r.closed = h.close;
-      dep = Math.max(now, dep + (skips.has(s.id) ? 0 : (s.stay || 0)));
+      dep = Math.max(now, dep + (gone(s.id) ? 0 : (s.stay || 0)));
       r.etd = dep; rows[k] = r;
       t = dep; from = k + 1;
     } else if (anchor.kind === 'leg') {
@@ -184,9 +187,9 @@
 
     // summary
     const ahead = rows.filter(Boolean);
-    const next = ahead.find(r => !r.here && isPoint(S[r.k]) && !r.skipped) || null;
-    const fixedAhead = ahead.filter(r => r.fixed != null && !r.skipped);
-    const issues = ahead.filter(r => (r.closed != null || r.short != null) && !r.skipped && !r.here);
+    const next = ahead.find(r => !r.here && isPoint(S[r.k]) && !r.skipped && !r.visited) || null;
+    const fixedAhead = ahead.filter(r => r.fixed != null && !r.skipped && !r.visited);
+    const issues = ahead.filter(r => (r.closed != null || r.short != null) && !r.skipped && !r.visited && !r.here);
     const last = ahead[ahead.length - 1];
     return { rows, next, fixed: fixedAhead, issues, finish: last ? last.etd : null, now };
   }
@@ -202,7 +205,7 @@
     if (!target) return null;
     const need = buffer - target.slack;
     const S = day.stops;
-    const cands = fc.rows.filter(r => r && !r.here && !r.skipped && r.k < target.k && skippable(S[r.k]))
+    const cands = fc.rows.filter(r => r && !r.here && !r.skipped && !r.visited && r.k < target.k && skippable(S[r.k]))
       .map(r => ({ k: r.k, id: S[r.k].id, gain: (S[r.k].stay || 0) + (S[r.k].skip_walk_min || 0), closed: r.closed != null }))
       .filter(c => c.gain > 0)
       .sort((a, b) => (b.closed - a.closed) || (b.gain - a.gain));

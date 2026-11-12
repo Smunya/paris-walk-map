@@ -223,6 +223,9 @@
   .srow .tm b.amber { color: var(--paid); } .srow .tm b.red { color: var(--closed); }
   .srow.skip .nm { color: var(--muted); text-decoration: line-through; }
   .srow.here { background: var(--sel-bg); }
+  .srow.vis { opacity: .55; }
+  .srow.vis .fl { color: var(--free); font-weight: 700; }
+  .slh { margin: 16px 0 2px; }
   .sfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--muted); }
 </style>
 </head>
@@ -250,7 +253,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="data.js?v=2026-11-13b"></script>
 <script src="saved.js?v=2026-11-12b" onerror="window.SAVED=[]"></script>
-<script src="schedule.js?v=2026-11-13b"></script>
+<script src="schedule.js?v=2026-11-13c"></script>
 <script>
 const P = window.PARIS;
 const SAVED = window.SAVED || [];
@@ -563,9 +566,7 @@ function scrollListTo(el) {
 }
 function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
 function resetLegs() {
-  // legs already walked (live schedule) fade out
-  const walked = (dj, j) => LIVE.st && LIVE.di === dj && j <= LIVE.st.p;
-  dayLayers.forEach((l, dj) => l.legs.forEach((x, j) => x && P.days[dj].stops[j].mode !== 'metro' && x.setStyle({ weight: 5, opacity: walked(dj, j) ? 0.3 : 0.85 })));
+  dayLayers.forEach((l, dj) => l.legs.forEach((x, j) => x && P.days[dj].stops[j].mode !== 'metro' && x.setStyle({ weight: 5, opacity: 0.85 })));
 }
 function highlightLeg(di, i) {
   resetLegs();
@@ -914,7 +915,7 @@ function liveRecalc() {
     else if (st.p > 0) LIVE.anchor = { kind: 'at', i: st.p, since: st.arrived[d.stops[st.p].id] ?? nowMin() };
     else LIVE.anchor = { kind: 'start' };
   }
-  LIVE.fc = Sched.forecast(d, LIVE.anchor, { now: nowMin(), skips: st.skips });
+  LIVE.fc = Sched.forecast(d, LIVE.anchor, { now: nowMin(), skips: st.skips, visited: VISITED[LIVE.di] });
   LIVE.sg = Sched.suggestSkips(d, LIVE.fc);
   liveRender();
 }
@@ -922,6 +923,7 @@ function liveReset() {
   if (LIVE.di == null) return;
   try { localStorage.removeItem(liveKey(LIVE.di)); } catch (e) {}
   LIVE.st = { p: -1, arrived: {}, skips: new Set(), manual: null };
+  VISITED[LIVE.di].clear(); saveVisited(LIVE.di);
   LIVE.anchor = null;
   if (LIVE.coords) liveFix(LIVE.coords, true); else liveRecalc();
 }
@@ -929,6 +931,19 @@ function toggleSkip(id) {
   const s = LIVE.st.skips;
   if (s.has(id)) s.delete(id); else s.add(id);
   liveSave(); liveRecalc();
+}
+// "✓ Відвідано": only you mark a stop as visited (GPS never does); kept per day on this phone
+const VISITED = P.days.map(d => {
+  try { return new Set(JSON.parse(localStorage.getItem('paris-visited-' + d.id)) || []); } catch (e) { return new Set(); }
+});
+function saveVisited(di) {
+  try { localStorage.setItem('paris-visited-' + P.days[di].id, JSON.stringify([...VISITED[di]])); } catch (e) {}
+}
+function toggleVisit(di, id) {
+  const v = VISITED[di];
+  if (v.has(id)) v.delete(id); else v.add(id);
+  saveVisited(di);
+  if (LIVE.di === di) liveRecalc(); else { liveMarkers(); refreshSheet(); }
 }
 
 // ---- live: texts
@@ -960,10 +975,12 @@ function liveStatusText() {
 }
 // forecast line in a stop's sheet
 function liveRowHtml(di, i) {
+  const s = P.days[di].stops[i];
+  if (VISITED[di].has(s.id)) return '<div class="fcline ok">✓ Відвідано</div>';
   if (!LIVE.fc || LIVE.di !== di) return '';
-  const s = P.days[di].stops[i], r = LIVE.fc.rows[i];
+  const r = LIVE.fc.rows[i];
   if (LIVE.st.skips.has(s.id)) return '<div class="fcline amber">Пропущено</div>';
-  if (!r) return i <= LIVE.st.p ? '<div class="fcline ok">✓ Пройдено</div>' : '';
+  if (!r) return '';                       // behind your position: the plan time in the header is enough
   if (r.here) return `<div class="fcline ok">Ви тут · далі ≈${Sched.fmt(r.etd)}${r.slack != null ? ' · ' + slackTxt(r.slack) : ''}</div>`;
   const lvl = r.slack != null && r.slack < 0 ? 'red'
     : (r.delay >= 15 || r.closed != null || r.short != null || (r.slack != null && r.slack < BUF) ? 'amber' : 'ok');
@@ -977,10 +994,12 @@ function liveRowHtml(di, i) {
 function liveBtnsHtml(di, i) {
   const s = P.days[di].stops[i];
   if (s.kind === 'via') return '';
-  let h = '';
+  const vis = VISITED[di].has(s.id);
+  let h = `<button type="button" data-visit="${esc(s.id)}" class="${vis ? 'on' : ''}">${vis ? '↩ Не відвідано' : '✓ Відвідано'}</button>`;
   if (TRIP == null || TRIP === di) h += `<button type="button" data-here="${i}">📍 Я тут</button>`;
-  if (LIVE.fc && LIVE.di === di && Sched.skippable(s) || (LIVE.fc && LIVE.di === di && LIVE.st.skips.has(s.id))) {
-    const on = LIVE.st.skips.has(s.id);
+  // "skip" only for stops still ahead of you (or to undo a skip)
+  const live = LIVE.fc && LIVE.di === di, on = live && LIVE.st.skips.has(s.id);
+  if (on || (live && !vis && Sched.skippable(s) && LIVE.fc.rows[i] && !LIVE.fc.rows[i].here)) {
     h += `<button type="button" data-skip="${esc(s.id)}" class="${on ? 'on' : ''}">${on ? '↩ Повернути' : 'Пропустити'}</button>`;
   }
   return h ? `<div class="sh-btns">${h}</div>` : '';
@@ -1009,17 +1028,23 @@ function schedHtml() {
       (sg.enough ? '' : '<p class="note">Навіть так запасу не вистачить: подумайте про метро або таксі.</p>') + '</div>';
   }
   if (!LIVE.hadFix) b += '<p class="note">Натисніть 📍 на карті: з геолокацією прогноз оновлюється сам. Без неї — відкрийте точку, де ви зараз, і натисніть «📍 Я тут».</p>';
-  const passed = d.stops.filter((s, k) => k <= LIVE.st.p && s.kind !== 'via' && !fc.rows[k]).length;
-  if (passed) b += `<p class="note">✓ Пройдено точок: ${passed}</p>`;
-  b += '<ul class="slist">' + fc.rows.filter(r => r && d.stops[r.k].kind !== 'via').map(r => {
-    const s = d.stops[r.k];
+  // every stop of the day in order; the ones you marked as visited go to the end
+  const row = (k, cls, fl, tm) => { const s = d.stops[k];
+    return `<li><button type="button" class="srow${cls}" data-k="${k}"><span class="num" style="background:${s.line_color || d.color}">${s._n}</span>` +
+      `<span class="nm">${esc(stopShort(s))}</span><span class="fl">${fl}</span><span class="tm">${tm}</span></button></li>`; };
+  let list = '', vis = '', nvis = 0;
+  d.stops.forEach((s, k) => {
+    if (s.kind === 'via') return;
+    if (VISITED[di].has(s.id)) { vis += row(k, ' vis', '✓', s.arrive); nvis++; return; }
+    const r = fc.rows[k];
+    if (!r) { list += row(k, '', '', s.arrive); return; }           // behind you: just the plan
     const lvl = r.slack != null && r.slack < 0 ? 'red' : (r.delay >= 15 || r.closed != null || r.short != null || (r.slack != null && r.slack < BUF) ? 'amber' : '');
     const fl = (r.wait ? '⏳' : '') + (r.closed != null ? '⛔' : r.short != null ? '⏱' : '') + (s.fixed ? '🕒' : '');
     const tm = r.skipped ? 'пропущено' : r.here ? 'ви тут' : `${s.arrive} → <b class="${lvl}">≈${Sched.fmt(r.eta)}</b>`;
-    return `<li><button type="button" class="srow${r.skipped ? ' skip' : ''}${r.here ? ' here' : ''}" data-k="${r.k}">` +
-      `<span class="num" style="background:${s.line_color || d.color}">${s._n}</span><span class="nm">${esc(stopShort(s))}</span>` +
-      `<span class="fl">${fl}</span><span class="tm">${tm}</span></button></li>`;
-  }).join('') + '</ul>';
+    list += row(k, (r.skipped ? ' skip' : '') + (r.here ? ' here' : ''), fl, tm);
+  });
+  b += `<ul class="slist">${list}</ul>`;
+  if (nvis) b += `<div class="fh slh">Відвідані (${nvis})</div><ul class="slist">${vis}</ul>`;
   b += `<div class="sfoot"><button type="button" class="sbtn" data-reset>Скинути відмітки дня</button>` +
     `<span>Прогноз: геолокація + годинник, темп 4,5 км/год.</span></div>`;
   return { head, body: b };
@@ -1034,6 +1059,13 @@ function openSched() {
   setSel(null); resetLegs();
   if (shState === 'closed') { try { history.pushState({ sheet: 1 }, ''); } catch (e) {} }
   setState('full');
+  // the list holds the whole day: scroll to where you are (warnings and suggestions stay above)
+  const at = shBody.querySelector('.srow.here') || shBody.querySelector('.srow .tm b');
+  const first = shBody.querySelector('.slist');
+  if (at && first) {
+    const row = at.closest('.srow'), top = row.getBoundingClientRect().top - first.getBoundingClientRect().top;
+    if (top > 0) shBody.scrollTop = first.offsetTop + top - shBody.offsetTop - 8;
+  }
 }
 // keep an open sheet in step with a new forecast
 function refreshSheet() {
@@ -1052,10 +1084,9 @@ function liveMarkers() {
   P.days.forEach((d, dj) => dayLayers[dj].markers.forEach((m, i) => {
     const el = m && m.getElement();
     if (!el) return;
-    const on = LIVE.di === dj && LIVE.st;
-    const here = on && LIVE.anchor && LIVE.anchor.kind === 'at' && LIVE.anchor.i === i;
-    el.classList.toggle('done', !!(on && i <= LIVE.st.p && !here));
-    el.classList.toggle('skipped', !!(on && LIVE.st.skips.has(d.stops[i].id)));
+    const id = d.stops[i].id;
+    el.classList.toggle('done', VISITED[dj].has(id));                    // only what you marked yourself
+    el.classList.toggle('skipped', !!(LIVE.di === dj && LIVE.st && LIVE.st.skips.has(id)));
   }));
 }
 function liveRender() {
@@ -1074,9 +1105,10 @@ function liveRender() {
 }
 document.getElementById('live').onclick = openSched;
 sheet.addEventListener('click', e => {
-  const b = e.target.closest('[data-here],[data-skip],[data-skipall],[data-reset],.srow');
+  const b = e.target.closest('[data-here],[data-visit],[data-skip],[data-skipall],[data-reset],.srow');
   if (!b) return;
-  if (b.dataset.here != null && cur && cur.t === 'stop') liveHere(cur.di, +b.dataset.here);
+  if (b.dataset.visit != null && cur && cur.t === 'stop') toggleVisit(cur.di, b.dataset.visit);
+  else if (b.dataset.here != null && cur && cur.t === 'stop') liveHere(cur.di, +b.dataset.here);
   else if (b.dataset.skip != null) toggleSkip(b.dataset.skip);
   else if (b.dataset.skipall != null && LIVE.sg) { LIVE.sg.picks.forEach(p => LIVE.st.skips.add(p.id)); liveSave(); liveRecalc(); }
   else if (b.dataset.reset != null) {
