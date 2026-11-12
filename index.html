@@ -226,6 +226,7 @@
   .srow.vis { opacity: .55; }
   .srow.vis .fl { color: var(--free); font-weight: 700; }
   .slh { margin: 16px 0 2px; }
+  .spast summary { padding: 8px 2px; color: var(--muted); font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--line); }
   .sfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--muted); }
 </style>
 </head>
@@ -253,7 +254,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="data.js?v=2026-11-13b"></script>
 <script src="saved.js?v=2026-11-12b" onerror="window.SAVED=[]"></script>
-<script src="schedule.js?v=2026-11-13c"></script>
+<script src="schedule.js?v=2026-11-13h"></script>
 <script>
 const P = window.PARIS;
 const SAVED = window.SAVED || [];
@@ -472,6 +473,7 @@ function render() {
   });
   if (selMarker && selMarker.getElement()) selMarker.getElement().classList.add('msel'); // icon is re-created on re-add
   liveMarkers();
+  if (LIVE.fc) liveRender();      // the status line follows the day tab right away
 }
 function finishStat() {
   if (current === 'all') return stat('2 дні', '');
@@ -852,25 +854,31 @@ try { navigator.permissions && navigator.permissions.query({ name: 'geolocation'
 
 // ---- live schedule: where am I on today's route and what to expect (engine: schedule.js)
 // Test overrides: ?day=0 (treat that day as today), ?now=10:30 (clock), ?pos=48.846,2.346 (one GPS fix)
+// Demo: ?sim=0 runs the day in fast-forward with a simulated walker (sim.js), own storage
 const QS = new URLSearchParams(location.search);
-const TRIP = QS.has('day') ? +QS.get('day') : dayByDate();
-const LIVE = { di: null, st: null, anchor: null, fc: null, sg: null, lastFix: 0, coords: null, hadFix: false };
+const SIMDAY = QS.has('sim') ? +QS.get('sim') || 0 : null;
+const TRIP = SIMDAY != null ? SIMDAY : QS.has('day') ? +QS.get('day') : dayByDate();
+const NS = SIMDAY != null ? 'paris-sim-' : 'paris-';     // the demo never touches your real marks
+const LIVE = { di: null, st: null, anchor: null, fc: null, sg: null, lastFixMin: -1e9, coords: null, hadFix: false };
 const BUF = Sched.BUFFER;
 function nowMin() {
+  if (window.SIM && SIM.now != null) return SIM.now;
   if (QS.get('now')) return Sched.toMin(QS.get('now'));
-  const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+  const d = new Date(), m = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+  return m < 240 ? m + 1440 : m;     // after midnight the evening is still the same day
 }
-const liveKey = di => 'paris-live-' + P.days[di].id;
+const liveKey = di => NS + 'live-' + P.days[di].id;
 function liveLoad(di) {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(liveKey(di))); } catch (e) {}
   s = s || {};
-  return { p: s.p ?? -1, arrived: s.arrived || {}, skips: new Set(s.skips || []), manual: s.manual || null };
+  return { p: s.p ?? -1, arrived: s.arrived || {}, skips: new Set(s.skips || []), manual: s.manual || null,
+           pace: s.pace || null, stays: s.stays || null, lastAt: s.lastAt || null, lastFix: s.lastFix || null };
 }
 function liveSave() {
   if (LIVE.di == null) return;
   const s = LIVE.st;
-  try { localStorage.setItem(liveKey(LIVE.di), JSON.stringify({ p: s.p, arrived: s.arrived, skips: [...s.skips], manual: s.manual })); } catch (e) {}
+  try { localStorage.setItem(liveKey(LIVE.di), JSON.stringify({ p: s.p, arrived: s.arrived, skips: [...s.skips], manual: s.manual, pace: s.pace, stays: s.stays, lastAt: s.lastAt, lastFix: s.lastFix })); } catch (e) {}
 }
 function liveStart(di) {
   if (LIVE.di === di) return;
@@ -881,21 +889,11 @@ function liveFix(c, force) {
   if (TRIP == null || !c) return;
   liveStart(TRIP);
   LIVE.coords = c; LIVE.hadFix = true;
-  const t = Date.now();
-  if (!force && LIVE.anchor && t - LIVE.lastFix < 15000) return;
-  LIVE.lastFix = t;
-  const d = P.days[TRIP], now = nowMin(), st = LIVE.st;
-  const r = Sched.locate(d, { lat: c.latitude, lon: c.longitude, acc: c.accuracy }, st.p);
-  if (r.kind === 'at' || r.kind === 'done') {
-    const i = r.kind === 'at' ? r.i : d.stops.length - 1, id = d.stops[i].id;
-    if (st.arrived[id] == null) st.arrived[id] = now;
-    LIVE.anchor = { kind: 'at', i, since: st.arrived[id] };
-    st.p = Math.max(st.p, i);
-  } else {
-    LIVE.anchor = r.kind === 'leg' ? { kind: 'leg', i: r.i, frac: r.frac } : { kind: 'off', i: r.i, walk: r.walk, d: r.d };
-    st.p = r.p;
-  }
-  st.manual = null;
+  const now = nowMin();
+  if (!force && LIVE.anchor && now - LIVE.lastFixMin < 0.25) return;   // at most every 15 s of (clock) time
+  LIVE.lastFixMin = now;
+  LIVE.anchor = Sched.track(P.days[TRIP], LIVE.st, { lat: c.latitude, lon: c.longitude, acc: c.accuracy }, now, liveOpts()).anchor;
+  LIVE.st.manual = null;
   liveSave(); liveRecalc();
 }
 // "I'm here" from a stop's sheet (no GPS, or to correct it)
@@ -904,8 +902,13 @@ function liveHere(di, i) {
   const now = nowMin(), st = LIVE.st, id = P.days[di].stops[i].id;
   st.p = i; st.arrived[id] = now; st.manual = { i, at: now };
   LIVE.anchor = { kind: 'at', i, since: now };
+  st.lastFix = { t: now, anchor: LIVE.anchor };
   liveSave(); liveRecalc();
   toast('Прогноз рахується від цієї точки й поточного часу.', 3500);
+}
+function liveOpts() {
+  const st = LIVE.st;
+  return { skips: st.skips, visited: VISITED[LIVE.di], pace: Sched.paceFactor(st), stays: Sched.stayFactor(st) };
 }
 function liveRecalc() {
   if (LIVE.di == null) return;
@@ -915,14 +918,14 @@ function liveRecalc() {
     else if (st.p > 0) LIVE.anchor = { kind: 'at', i: st.p, since: st.arrived[d.stops[st.p].id] ?? nowMin() };
     else LIVE.anchor = { kind: 'start' };
   }
-  LIVE.fc = Sched.forecast(d, LIVE.anchor, { now: nowMin(), skips: st.skips, visited: VISITED[LIVE.di] });
+  LIVE.fc = Sched.forecast(d, LIVE.anchor, Object.assign({ now: nowMin() }, liveOpts()));
   LIVE.sg = Sched.suggestSkips(d, LIVE.fc);
   liveRender();
 }
 function liveReset() {
   if (LIVE.di == null) return;
   try { localStorage.removeItem(liveKey(LIVE.di)); } catch (e) {}
-  LIVE.st = { p: -1, arrived: {}, skips: new Set(), manual: null };
+  LIVE.st = { p: -1, arrived: {}, skips: new Set(), manual: null, pace: null, stays: null, lastAt: null, lastFix: null };
   VISITED[LIVE.di].clear(); saveVisited(LIVE.di);
   LIVE.anchor = null;
   if (LIVE.coords) liveFix(LIVE.coords, true); else liveRecalc();
@@ -934,10 +937,10 @@ function toggleSkip(id) {
 }
 // "✓ Відвідано": only you mark a stop as visited (GPS never does); kept per day on this phone
 const VISITED = P.days.map(d => {
-  try { return new Set(JSON.parse(localStorage.getItem('paris-visited-' + d.id)) || []); } catch (e) { return new Set(); }
+  try { return new Set(JSON.parse(localStorage.getItem(NS + 'visited-' + d.id)) || []); } catch (e) { return new Set(); }
 });
 function saveVisited(di) {
-  try { localStorage.setItem('paris-visited-' + P.days[di].id, JSON.stringify([...VISITED[di]])); } catch (e) {}
+  try { localStorage.setItem(NS + 'visited-' + P.days[di].id, JSON.stringify([...VISITED[di]])); } catch (e) {}
 }
 function toggleVisit(di, id) {
   const v = VISITED[di];
@@ -1004,6 +1007,14 @@ function liveBtnsHtml(di, i) {
   }
   return h ? `<div class="sh-btns">${h}</div>` : '';
 }
+// what the forecast assumes about you (learnt from the stops you have walked between)
+function paceNote() {
+  const st = LIVE.st, f = Sched.paceFactor(st), sf = Sched.stayFactor(st);
+  const pct = x => (x >= 1 ? '+' : '−') + Math.round(Math.abs(x - 1) * 100) + '%';
+  if (!st.pace && !st.stays) return 'Прогноз: геолокація + годинник, темп за планом (4,5 км/год). Він підлаштується під вас за кілька відрізків.';
+  return `Прогноз підлаштовано під вас: ходьба ${Math.abs(f - 1) < 0.03 ? 'як у плані' : pct(f) + ' часу'}, ` +
+    `зупинки ${Math.abs(sf - 1) < 0.03 ? 'як у плані' : pct(sf) + ' часу'}.`;
+}
 // the "Розклад" sheet: warnings, what to skip, the rest of the day
 function schedHtml() {
   const di = LIVE.di, d = P.days[di], fc = LIVE.fc, sg = LIVE.sg, now = nowMin();
@@ -1032,21 +1043,23 @@ function schedHtml() {
   const row = (k, cls, fl, tm) => { const s = d.stops[k];
     return `<li><button type="button" class="srow${cls}" data-k="${k}"><span class="num" style="background:${s.line_color || d.color}">${s._n}</span>` +
       `<span class="nm">${esc(stopShort(s))}</span><span class="fl">${fl}</span><span class="tm">${tm}</span></button></li>`; };
-  let list = '', vis = '', nvis = 0;
+  let list = '', vis = '', nvis = 0, past = '', npast = 0;
   d.stops.forEach((s, k) => {
     if (s.kind === 'via') return;
     if (VISITED[di].has(s.id)) { vis += row(k, ' vis', '✓', s.arrive); nvis++; return; }
     const r = fc.rows[k];
-    if (!r) { list += row(k, '', '', s.arrive); return; }           // behind you: just the plan
+    if (!r) { past += row(k, '', '', s.arrive); npast++; return; }  // behind you: just the plan, folded
     const lvl = r.slack != null && r.slack < 0 ? 'red' : (r.delay >= 15 || r.closed != null || r.short != null || (r.slack != null && r.slack < BUF) ? 'amber' : '');
     const fl = (r.wait ? '⏳' : '') + (r.closed != null ? '⛔' : r.short != null ? '⏱' : '') + (s.fixed ? '🕒' : '');
     const tm = r.skipped ? 'пропущено' : r.here ? 'ви тут' : `${s.arrive} → <b class="${lvl}">≈${Sched.fmt(r.eta)}</b>`;
     list += row(k, (r.skipped ? ' skip' : '') + (r.here ? ' here' : ''), fl, tm);
   });
+  // warnings and suggestions stay on top; the stops behind your position are folded away
+  if (npast) b += `<details class="spast"${LIVE.pastOpen ? ' open' : ''}><summary>Раніше за маршрутом: ${npast}</summary><ul class="slist">${past}</ul></details>`;
   b += `<ul class="slist">${list}</ul>`;
   if (nvis) b += `<div class="fh slh">Відвідані (${nvis})</div><ul class="slist">${vis}</ul>`;
   b += `<div class="sfoot"><button type="button" class="sbtn" data-reset>Скинути відмітки дня</button>` +
-    `<span>Прогноз: геолокація + годинник, темп 4,5 км/год.</span></div>`;
+    `<span>${paceNote()}</span></div>`;
   return { head, body: b };
 }
 function openSched() {
@@ -1059,13 +1072,6 @@ function openSched() {
   setSel(null); resetLegs();
   if (shState === 'closed') { try { history.pushState({ sheet: 1 }, ''); } catch (e) {} }
   setState('full');
-  // the list holds the whole day: scroll to where you are (warnings and suggestions stay above)
-  const at = shBody.querySelector('.srow.here') || shBody.querySelector('.srow .tm b');
-  const first = shBody.querySelector('.slist');
-  if (at && first) {
-    const row = at.closest('.srow'), top = row.getBoundingClientRect().top - first.getBoundingClientRect().top;
-    if (top > 0) shBody.scrollTop = first.offsetTop + top - shBody.offsetTop - 8;
-  }
 }
 // keep an open sheet in step with a new forecast
 function refreshSheet() {
@@ -1104,6 +1110,8 @@ function liveRender() {
   updTop();
 }
 document.getElementById('live').onclick = openSched;
+// keep "Раніше за маршрутом" open across forecast refreshes once you opened it
+sheet.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('spast')) LIVE.pastOpen = e.target.open; }, true);
 sheet.addEventListener('click', e => {
   const b = e.target.closest('[data-here],[data-visit],[data-skip],[data-skipall],[data-reset],.srow');
   if (!b) return;
@@ -1132,6 +1140,11 @@ fit();
 zoomClass();
 liveRecalc();
 if (QS.get('pos')) { const [la, lo] = QS.get('pos').split(',').map(Number); onPos({ coords: { latitude: la, longitude: lo, accuracy: 10 } }); }
+if (SIMDAY != null) {               // fast-forward demo: load the simulated walker only when asked
+  const js = document.createElement('script');
+  js.src = 'sim.js?v=2026-11-13b'; js.onload = () => Sim.demo();
+  document.body.appendChild(js);
+}
 </script>
 </body>
 </html>
