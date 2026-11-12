@@ -2,9 +2,18 @@
 <html lang="uk">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Париж: піші маршрути 14–15.11</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%8D%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script>
+  // phone layout is chosen once at load, so rotating the phone keeps the same layout
+  (function () {
+    var mq = function (q) { return !!(window.matchMedia && window.matchMedia(q).matches); };
+    if (mq('(max-width: 760px)') || (mq('(pointer: coarse)') && Math.min(screen.width, screen.height) <= 500))
+      document.documentElement.classList.add('phone');
+  })();
+</script>
 <style>
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --text: #1f2430; --muted: #6b7280; --line: #e7e5e0;
@@ -91,41 +100,94 @@
   .ftoggle { display: none; margin-top: 8px; padding: 4px 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
   .zoomed-out .mlabel { display: none; }
   .filters[hidden] { display: none; }
-  @media (max-width: 760px) {
-    #side header { position: sticky; top: 0; z-index: 5; background: var(--panel); padding: 8px 12px 6px; }
-    #side h1 { display: none; }
-    .stats { grid-template-columns: repeat(4, 1fr) !important; gap: 4px; margin-top: 6px; }
-    .stat { padding: 4px 6px; } .stat b { font-size: 13px; } .stat span { font-size: 10px; }
-    .ftoggle { display: block; }
-    .day-head { padding-top: 10px; }
-    .leaflet-marker-icon .pw { transform: scale(.82); }
-    .leaflet-popup-content { max-width: 240px; }
-    .pop img { width: 220px; height: 120px; }
-  }
+  .hrow { display: flex; gap: 6px; align-items: stretch; }
+  .hrow .tabs { flex: 1; min-width: 0; }
   @keyframes flashbg { from { background: #fff3bf; } to { background: transparent; } }
   .flash { animation: flashbg 1.6s ease-out; }
   @media (prefers-reduced-motion: reduce) { .flash { animation: none; outline: 2px solid #f59f00; } }
   .foot { padding: 8px 16px; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--line); }
-  @media (max-width: 760px) { body { flex-direction: column-reverse; } #side { width: 100%; max-width: 100vw; height: 52vh; overflow-y: auto; overflow-x: hidden; } #side header, #side .stat, #side .body { min-width: 0; } .stats { grid-template-columns: repeat(2, 1fr); } .tabs button { padding: 7px 4px; } .legend .src { white-space: normal; } #list { overflow: visible; flex: none; } .day-head { position: static; } #map { height: 48vh; flex: none; } }
+  #sheet { display: none; }
+  .msel .pin { transform: scale(1.22); box-shadow: 0 0 0 3px #fff, 0 0 0 6px #1a73e8, 0 2px 8px rgba(0,0,0,.4); }
+
+  /* ---- phone: full-screen map, floating top panel, bottom sheet instead of the list and popups */
+  html.phone, html.phone body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  .phone body { display: block; }
+  .phone #map { position: fixed; inset: 0; width: 100%; height: 100%; }
+  .phone #side { position: fixed; z-index: 1000; top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: calc(env(safe-area-inset-left, 0px) + 8px); right: calc(env(safe-area-inset-right, 0px) + 8px);
+    width: auto; max-width: 560px; margin: 0 auto; border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.2); max-height: calc(100% - 24px - env(safe-area-inset-top, 0px)); overflow: hidden; }
+  .phone #side header { padding: 8px; border-bottom: 0; display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
+  .phone #side h1, .phone #list, .phone .foot { display: none; }
+  .phone .tabs button { padding: 8px 4px; font-weight: 600; }
+  .phone .ftoggle { display: grid; place-items: center; flex: none; width: 42px; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 18px; }
+  .phone .ftoggle[aria-expanded="true"] { background: var(--text); color: var(--panel); border-color: var(--text); }
+  .phone .stats { gap: 4px; margin-top: 6px; }
+  .phone .stat { padding: 3px 6px; min-width: 0; } .phone .stat b { font-size: 13px; white-space: nowrap; } .phone .stat span { font-size: 10px; }
+  .phone .filters { margin-top: 8px; overflow-y: auto; min-height: 0; max-height: 58dvh; overscroll-behavior: contain; }
+  .phone .chip { padding: 6px 10px; font-size: 13px; }
+  .phone .legend .src { white-space: normal; }
+  .phone .leaflet-top { top: var(--top-h, 0px); }
+  .phone .leaflet-marker-icon { -webkit-tap-highlight-color: transparent; }
+  .phone .pw::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; } /* ~44 px touch target */
+  .phone .locbtn { width: 40px; height: 40px; font-size: 19px; }
+
+  .phone #sheet { display: flex; flex-direction: column; position: fixed; z-index: 1100; left: 0; right: 0; bottom: 0;
+    max-width: 640px; margin: 0 auto; background: var(--panel); color: var(--text); border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 22px rgba(0,0,0,.25); padding-bottom: env(safe-area-inset-bottom, 0px);
+    height: calc(var(--peek, 200px) + env(safe-area-inset-bottom, 0px)); transition: height .25s ease, transform .25s ease, visibility 0s; }
+  .phone #sheet[data-state="full"] { height: min(calc(100% - env(safe-area-inset-top, 0px) - 40px), calc(var(--full, 100vh) + env(safe-area-inset-bottom, 0px))); }
+  .phone #sheet[data-state="closed"] { transform: translateY(110%); visibility: hidden; transition: transform .2s ease, visibility 0s .2s; }
+  .phone #sheet.dragging { transition: none; }
+  @media (prefers-reduced-motion: reduce) { .phone #sheet, .phone #sheet[data-state="closed"] { transition: none; } }
+  .grab { flex: none; height: 22px; display: grid; place-items: center; touch-action: none; cursor: grab; }
+  .grab span { width: 40px; height: 5px; border-radius: 3px; background: var(--muted); opacity: .45; }
+  .sh-x { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--bg); color: var(--text); font-size: 15px; cursor: pointer; z-index: 2; }
+  .sh-head { flex: none; display: flex; gap: 12px; padding: 0 52px 10px 14px; touch-action: none; min-width: 0; }
+  .sh-head .thumb { width: 64px; height: 64px; }
+  .sh-ti { min-width: 0; flex: 1; }
+  .sh-n { display: flex; gap: 7px; align-items: flex-start; font-weight: 650; font-size: 16px; line-height: 1.25; margin-top: 1px; }
+  .sh-n .num { width: 22px; height: 22px; font-size: 11px; margin-top: 0; }
+  .sh-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .sh-tags .src, .sh-tags .badge, .sh-tags .tag { margin: 0; }
+  .sh-body { flex: 1; min-height: 0; overflow: hidden; padding: 0 14px; overscroll-behavior: contain; }
+  #sheet[data-state="full"] .sh-body { overflow-y: auto; padding-bottom: 12px; }
+  .phone #sheet { overflow: hidden; }
+  .sh-big { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; display: block; margin-bottom: 10px; background: var(--bg); }
+  .sh-desc { margin: 0 0 4px; font-size: 14px; }
+  .sh-body .entry, .sh-body .note, .sh-body .near-list { font-size: 13px; margin-top: 8px; }
+  .sh-body .near-list .nl { display: inline-block; padding: 3px 0; }
+  .sh-act { flex: none; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); }
+  .sh-go { flex: 1; display: flex; }
+  .sh-go .navbtn { flex: 1; text-align: center; margin: 0; padding: 11px 12px; font-size: 15px; }
+  .sh-arrow { flex: none; width: 52px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 24px; line-height: 1; cursor: pointer; }
+  .sh-arrow:disabled { opacity: .3; cursor: default; }
+  .sh-arrow[hidden] { display: none; }
 </style>
 </head>
 <body>
 <aside id="side">
   <header>
     <h1>Париж, піші маршрути</h1>
-    <div class="tabs" id="tabs"></div>
+    <div class="hrow"><div class="tabs" id="tabs"></div><button type="button" class="ftoggle" id="ftoggle" aria-expanded="false" aria-controls="filters" aria-label="Фільтри й легенда" title="Фільтри й легенда">⚙</button></div>
     <div class="stats" id="stats"></div>
-    <button type="button" class="ftoggle" id="ftoggle" aria-expanded="true" aria-controls="filters">Фільтри й легенда</button>
     <div class="filters" id="filters"></div>
   </header>
   <div id="list"></div>
-  <div class="foot">Темп ≈ 4,5 км/год. Кроки = ходьба (1 400/км) + блукання на зупинках. Ціни й години — з відкритих джерел станом на листопад 2026, можуть змінюватися. Фото: Wikipedia.</div>
+  <div class="foot">Темп ≈ 4,5 км/год. Кроки = ходьба (1 400/км) + блукання на зупинках. Ціни й години — з відкритих джерел станом на листопад 2026, можуть змінюватися. Фото: Wikipedia / Wikimedia Commons.</div>
 </aside>
 <div id="map"></div>
+<section id="sheet" data-state="closed" aria-label="Деталі точки" inert>
+  <div class="grab" id="shGrab" role="button" tabindex="0" aria-label="Розгорнути або згорнути" aria-expanded="false"><span></span></div>
+  <button type="button" class="sh-x" id="shX" aria-label="Закрити">✕</button>
+  <div class="sh-head" id="shHead"></div>
+  <div class="sh-body" id="shBody"></div>
+  <div class="sh-act" id="shAct"><button type="button" class="sh-arrow" id="shPrev" aria-label="Попередня точка">‹</button><span class="sh-go" id="shGo"></span><button type="button" class="sh-arrow" id="shNext" aria-label="Наступна точка">›</button></div>
+</section>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="data.js"></script>
-<script src="saved.js" onerror="window.SAVED=[]"></script>
+<script src="data.js?v=2026-11-12b"></script>
+<script src="saved.js?v=2026-11-12b" onerror="window.SAVED=[]"></script>
 <script>
 const P = window.PARIS;
 const SAVED = window.SAVED || [];
@@ -146,7 +208,9 @@ function transitHtml(tr) {
 }
 const ENTRY = { free: 'Безкоштовно', paid: 'Платно', outside: 'Лише ззовні', closed: 'Зачинено', mixed: 'Частково безкоштовно', food: 'Заклад' };
 
-const map = L.map('map', { zoomControl: true, zoomSnap: 0.25 }).setView([48.855, 2.34], 13);
+const PHONE = document.documentElement.classList.contains('phone');
+const REDUCE = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const map = L.map('map', { zoomControl: !PHONE, zoomSnap: 0.25 }).setView([48.855, 2.34], 13);
 // base maps: street map / satellite / hybrid (satellite + street names)
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
 const esri = (name, extra) => L.tileLayer(ESRI + name + '/MapServer/tile/{z}/{y}/{x}', Object.assign({ attribution: 'Tiles &copy; Esri', maxZoom: 19 }, extra));
@@ -158,7 +222,7 @@ const BASE = {
 let baseName = 'Карта';
 try { const v = localStorage.getItem('paris-base'); if (v && BASE[v]) baseName = v; } catch (e) {}
 BASE[baseName].addTo(map);
-L.control.layers(BASE, null, { position: 'topright', collapsed: window.innerWidth < 760 }).addTo(map);
+L.control.layers(BASE, null, { position: 'topright', collapsed: PHONE || window.innerWidth < 760 }).addTo(map);
 map.on('baselayerchange', e => { try { localStorage.setItem('paris-base', e.name); } catch (err) {} });
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -176,10 +240,11 @@ function stopLabel(s, i) {
   const c = KIND2CAT[s.kind];
   return c ? CAT[c].e : String(i);
 }
-function entryHtml(en) {
+function entryHtml(en, noTag) {
   if (!en) return '';
-  if (en.inside === undefined) return `<div class="entry"><span class="tag ${en.t}">${ENTRY[en.t] || ''}</span>${esc(en.txt)}</div>`;
-  return `<div class="entry"><span class="tag ${en.t}">${ENTRY[en.t] || ''}</span>
+  const tag = noTag ? '' : `<span class="tag ${en.t}">${ENTRY[en.t] || ''}</span>`;
+  if (en.inside === undefined) return tag || en.txt ? `<div class="entry">${tag}${esc(en.txt)}</div>` : '';
+  return `<div class="entry">${tag}
     <div class="erow">🚪 <b>Всередину:</b> ${esc(en.inside)}</div>
     <div class="erow">💶 <b>Вартість:</b> ${esc(en.price)}</div>
     ${en.how ? `<div class="erow">🎟️ <b>Як купити / примітка:</b> ${esc(en.how)}</div>` : ''}</div>`;
@@ -192,13 +257,21 @@ function navBtn(lat, lon) {
   const u = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
   return `<a class="navbtn" href="${u}" target="_blank" rel="noopener">🧭 Вести сюди</a>`;
 }
+function savedPopup(p) {
+  return `<b>${CAT[p.cat].e} ${esc(p.name)}</b><br><span style="color:#888">${esc(CAT[p.cat].l)}${p.rating ? ' · ★' + p.rating : ''}${p.price ? ' · ' + esc(p.price) : ''}</span><br>${esc(p.desc)}<br>Сб: ${esc(p.sat || 'уточнити')} · Нд: ${esc(p.sun || 'уточнити')}<br>${p.near_m} м від маршруту ${p.day.slice(8,10)}.${p.day.slice(5,7)} · <a href="${p.gmaps}" target="_blank" rel="noopener">Google Maps ↗</a><div>${navBtn(p.lat, p.lon)}</div>`;
+}
+// desktop: Leaflet popup + scroll the side list; phone: open the bottom sheet
+function hook(m, html, item, onDesk) {
+  if (PHONE) m.on('click', () => openSheet(item));
+  else m.bindPopup(html, { maxWidth: 270 }).on('click', onDesk);
+  return m;
+}
 function popupHtml(s) {
   return `<div class="pop">${s.photo ? `<img src="${s.photo}" alt="">` : ''}<b>${esc(s.name)}</b>${srcBadge(s.src)}<br>
     <span style="color:#888">${s.arrive}${s.stay ? '–' + s.depart : ''}</span><br>${esc(s.desc || '')}${entryHtml(s.entry)}${transitHtml(s.transit)}<div>${navBtn(s.lat, s.lon)}</div></div>`;
 }
 
 // state
-const PHONE = window.matchMedia('(max-width: 760px)').matches;
 function dayByDate() {
   const d = new Date(), key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const i = P.days.findIndex(x => x.id === key);
@@ -233,9 +306,9 @@ P.days.forEach((d, di) => {
     if (s.kind !== 'hotel' && s.kind !== 'metro') n++;
     s._n = s.kind === 'hotel' ? 'H' : (s.kind === 'metro' ? 'M' : n);
     if (s.kind === 'metro') {
-      Ly.markers[i] = L.marker([s.lat, s.lon], { icon: icon(`M<sub>${s.line}</sub>`, s.line_color, 'metro', 30), zIndexOffset: 700 })
-        .bindTooltip(s.name.replace(/^Метро /, 'Ⓜ '), { permanent: true, direction: 'right', offset: [14, 0], className: 'mlabel' })
-        .bindPopup(popupHtml(s), { maxWidth: 270 }).on('click', () => selectCard(di, i)).addTo(Ly.group);
+      Ly.markers[i] = hook(L.marker([s.lat, s.lon], { icon: icon(`M<sub>${s.line}</sub>`, s.line_color, 'metro', 30), zIndexOffset: 700 })
+        .bindTooltip(s.name.replace(/^Метро /, 'Ⓜ '), { permanent: true, direction: 'right', offset: [14, 0], className: 'mlabel' }),
+        popupHtml(s), { t: 'stop', di, i }, () => selectCard(di, i)).addTo(Ly.group);
       return;
     }
     if (s.view && s.view_pt) {
@@ -244,25 +317,23 @@ P.days.forEach((d, di) => {
     }
     const lab = KIND2CAT[s.kind] ? CAT[KIND2CAT[s.kind]].e : s._n;
     const cls = (s.fixed ? 'fixed ' : '') + (KIND2CAT[s.kind] ? 'emo' : '') + (s.view ? ' view' : '');
-    Ly.markers[i] = L.marker([s.lat, s.lon], { icon: icon(lab, d.color, cls, s.fixed ? 32 : 26, s.src), zIndexOffset: s.fixed ? 600 : 300 })
-      .bindPopup(popupHtml(s), { maxWidth: 270 }).on('click', () => selectCard(di, i)).addTo(Ly.group);
+    Ly.markers[i] = hook(L.marker([s.lat, s.lon], { icon: icon(lab, d.color, cls, s.fixed ? 32 : 26, s.src), zIndexOffset: s.fixed ? 600 : 300 }),
+      popupHtml(s), { t: 'stop', di, i }, () => selectCard(di, i)).addTo(Ly.group);
   });
   (d.optional || []).forEach((o, k) => {
     const c = KIND2CAT[o.kind];
-    Ly.optMarkers[k] = L.marker([o.lat, o.lon], { icon: icon(c ? CAT[c].e : '+', '#868e96', 'opt', 22, o.src) })
-      .bindPopup(extraPopup(o, 'опційно, маршрут не прокладено'), { maxWidth: 270 }).on('click', () => revealCard(`.card.op[data-d="${di}"][data-k="${k}"]`)).addTo(Ly.opt);
+    Ly.optMarkers[k] = hook(L.marker([o.lat, o.lon], { icon: icon(c ? CAT[c].e : '+', '#868e96', 'opt', 22, o.src) }),
+      extraPopup(o, 'опційно, маршрут не прокладено'), { t: 'opt', di, k }, () => revealCard(`.card.op[data-d="${di}"][data-k="${k}"]`)).addTo(Ly.opt);
   });
   (d.nearby || []).forEach((o, k) => {
     const c = KIND2CAT[o.kind];
     const ic = c ? icon(CAT[c].e, '#fff', 'nearfood', 24, o.src) : icon('', d.color, 'near', 14);
-    Ly.nearMarkers[k] = L.marker([o.lat, o.lon], { icon: ic, zIndexOffset: 50 })
-      .bindPopup(extraPopup(o, 'по дорозі'), { maxWidth: 270 }).on('click', () => revealCard(`.nl[data-d="${di}"][data-k="${k}"]`)).addTo(Ly.near);
+    Ly.nearMarkers[k] = hook(L.marker([o.lat, o.lon], { icon: ic, zIndexOffset: 50 }),
+      extraPopup(o, 'по дорозі'), { t: 'near', di, k }, () => revealCard(`.nl[data-d="${di}"][data-k="${k}"]`)).addTo(Ly.near);
   });
 });
-const savedMarkers = SAVED.map(p => L.marker([p.lat, p.lon], { icon: icon(CAT[p.cat].e, '#fff', 'saved', 26, 'mine'), zIndexOffset: 100 })
-  .bindPopup(`<b>${CAT[p.cat].e} ${esc(p.name)}</b><br><span style="color:#888">${esc(CAT[p.cat].l)}${p.rating ? ' · ★' + p.rating : ''}${p.price ? ' · ' + esc(p.price) : ''}</span><br>${esc(p.desc)}<br>Сб: ${esc(p.sat || 'уточнити')} · Нд: ${esc(p.sun || 'уточнити')}<br>${p.near_m} м від маршруту ${p.day.slice(8,10)}.${p.day.slice(5,7)} · <a href="${p.gmaps}" target="_blank" rel="noopener">Google Maps ↗</a><div>${navBtn(p.lat, p.lon)}</div>`, { maxWidth: 270 }));
-
-savedMarkers.forEach((m, k) => m.on('click', () => revealCard(`.card.sv[data-k="${k}"]`)));
+const savedMarkers = SAVED.map((p, k) => hook(L.marker([p.lat, p.lon], { icon: icon(CAT[p.cat].e, '#fff', 'saved', 26, 'mine'), zIndexOffset: 100 }),
+  savedPopup(p), { t: 'saved', k }, () => revealCard(`.card.sv[data-k="${k}"]`)));
 function nearList(d, di, stopId) {
   if (!showNear) return '';
   const items = (d.nearby || []).map((o, k) => [o, k]).filter(([o]) => o.at === stopId);
@@ -279,7 +350,8 @@ function renderFilters() {
     `<span class="chip ${showSaved ? '' : 'off'}" data-x="saved">⭐ мої збережені</span>` +
     `<span class="chip ${showNear ? '' : 'off'}" data-x="near">👀 по дорозі</span>` +
     `<span class="chip ${showOpt ? '' : 'off'}" data-x="opt">＋ опційні</span>` +
-    `<div class="legend"><span class="src mine">★ ваш список</span> — місця з вашого списку «Париж» у Google Maps · <span class="src tip">◆ моя порада</span> — заклади, які пропоную я · <span class="src view">👁 здалеку</span> — не підходимо, дивимось з маршруту (пунктир — лінія погляду)</div>`;
+    `<div class="legend"><span class="src mine">★ ваш список</span> — місця з вашого списку «Париж» у Google Maps · <span class="src tip">◆ моя порада</span> — заклади, які пропоную я · <span class="src view">👁 здалеку</span> — не підходимо, дивимось з маршруту (пунктир — лінія погляду)</div>` +
+    (PHONE ? `<div class="legend">${esc(document.querySelector('.foot').textContent)}</div>` : '');
   document.querySelectorAll('#filters .chip').forEach(ch => ch.onclick = () => {
     if (ch.dataset.c) catOn[ch.dataset.c] = !catOn[ch.dataset.c];
     if (ch.dataset.x === 'saved') showSaved = !showSaved;
@@ -294,7 +366,13 @@ function render() {
   document.getElementById('tabs').innerHTML =
     P.days.map((d, i) => `<button data-d="${i}" class="${current === i ? 'on' : ''}">${d.label.split(/[,:]/)[0]}</button>`).join('') +
     `<button data-d="all" class="${current === 'all' ? 'on' : ''}">Обидва</button>`;
-  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => { current = b.dataset.d === 'all' ? 'all' : +b.dataset.d; try { localStorage.setItem('paris-day', String(current)); } catch (e) {} document.getElementById('side').scrollTop = 0; render(); fit(); });
+  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+    current = b.dataset.d === 'all' ? 'all' : +b.dataset.d;
+    try { localStorage.setItem('paris-day', String(current)); } catch (e) {}
+    document.getElementById('side').scrollTop = 0;
+    if (PHONE) { dismiss(); setFilters(false); }
+    render(); fit();
+  });
   renderFilters();
 
   const km = days.reduce((a, i) => a + P.days[i].km, 0);
@@ -305,6 +383,25 @@ function render() {
     stat(Math.floor(walk / 60) + ' г ' + (walk % 60) + ' хв', 'у русі') +
     stat(current === 'all' ? '2 дні' : P.days[current].start + '–' + P.days[current].end, current === 'all' ? '' : 'старт–фініш');
 
+  if (!PHONE) renderList(days);
+
+  P.days.forEach((_, i) => {
+    [dayLayers[i].group, dayLayers[i].opt, dayLayers[i].near].forEach(g => map.removeLayer(g));
+    if (days.includes(i)) {
+      dayLayers[i].group.addTo(map);
+      if (showOpt) dayLayers[i].opt.addTo(map);
+      if (showNear) dayLayers[i].near.addTo(map);
+    }
+  });
+  savedMarkers.forEach((m, k) => {
+    const on = showSaved && catOn[SAVED[k].cat];
+    if (on && !map.hasLayer(m)) m.addTo(map);
+    if (!on && map.hasLayer(m)) map.removeLayer(m);
+  });
+  if (selMarker && selMarker.getElement()) selMarker.getElement().classList.add('msel'); // icon is re-created on re-add
+}
+
+function renderList(days) {
   let html = '';
   days.forEach(di => {
     const d = P.days[di];
@@ -378,20 +475,6 @@ function render() {
     map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 16), { duration: 0.6 });
     m.openPopup();
   });
-
-  P.days.forEach((_, i) => {
-    [dayLayers[i].group, dayLayers[i].opt, dayLayers[i].near].forEach(g => map.removeLayer(g));
-    if (days.includes(i)) {
-      dayLayers[i].group.addTo(map);
-      if (showOpt) dayLayers[i].opt.addTo(map);
-      if (showNear) dayLayers[i].near.addTo(map);
-    }
-  });
-  savedMarkers.forEach((m, k) => {
-    const on = showSaved && catOn[SAVED[k].cat];
-    if (on && !map.hasLayer(m)) m.addTo(map);
-    if (!on && map.hasLayer(m)) map.removeLayer(m);
-  });
 }
 
 // ---- map -> list: scroll the list to the card of a clicked marker
@@ -403,8 +486,11 @@ function scrollListTo(el) {
   box.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
 }
 function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
-function highlightLeg(di, i) {
+function resetLegs() {
   dayLayers.forEach((l, dj) => l.legs.forEach((x, j) => x && P.days[dj].stops[j].mode !== 'metro' && x.setStyle({ weight: 5, opacity: 0.85 })));
+}
+function highlightLeg(di, i) {
+  resetLegs();
   const leg = dayLayers[di].legs[i];
   if (leg && P.days[di].stops[i].mode !== 'metro') { leg.setStyle({ weight: 8, opacity: 1 }); leg.bringToFront(); }
 }
@@ -439,7 +525,192 @@ function fit() {
   const days = current === 'all' ? P.days : [P.days[current]];
   const pts = days.flatMap(d => d.stops.map(s => [s.lat, s.lon]));
   map.invalidateSize();
-  map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+  if (PHONE) map.fitBounds(pts, { paddingTopLeft: [24, topH() + 12], paddingBottomRight: [24, 24 + (shState === 'closed' ? 0 : sheetPeekH())], maxZoom: 16 });
+  else map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+}
+
+// ---- phone: bottom sheet with the details of the tapped point
+const sheet = document.getElementById('sheet'), side = document.getElementById('side');
+const shHead = document.getElementById('shHead'), shBody = document.getElementById('shBody'), shAct = document.getElementById('shAct');
+const shGo = document.getElementById('shGo'), shPrev = document.getElementById('shPrev'), shNext = document.getElementById('shNext');
+const shGrab = document.getElementById('shGrab'), shX = document.getElementById('shX');
+let cur = null, shState = 'closed', selMarker = null;
+
+function topH() { return PHONE ? side.getBoundingClientRect().bottom : 0; }
+function updTop() { document.documentElement.style.setProperty('--top-h', Math.round(topH()) + 'px'); }
+function peekPx() { return shGrab.offsetHeight + shHead.offsetHeight + shAct.offsetHeight; }
+function sheetPeekH() { return peekPx() + (parseFloat(getComputedStyle(sheet).paddingBottom) || 0); }
+
+function itemObj(it) {
+  if (it.t === 'saved') return SAVED[it.k];
+  const d = P.days[it.di];
+  return it.t === 'stop' ? d.stops[it.i] : it.t === 'opt' ? d.optional[it.k] : d.nearby[it.k];
+}
+function itemMarker(it) {
+  if (it.t === 'saved') return savedMarkers[it.k];
+  const Ly = dayLayers[it.di];
+  return it.t === 'stop' ? Ly.markers[it.i] : it.t === 'opt' ? Ly.optMarkers[it.k] : Ly.nearMarkers[it.k];
+}
+// route order for ‹ ›: the shown day (or both days in a row), every stop that has a marker
+function routeSeq() {
+  const days = current === 'all' ? P.days.map((_, i) => i) : [current];
+  const out = [];
+  days.forEach(di => P.days[di].stops.forEach((s, i) => { if (dayLayers[di].markers[i]) out.push({ t: 'stop', di, i }); }));
+  return out;
+}
+function seqPos(seq, it) { return seq.findIndex(x => x.di === it.di && x.i === it.i); }
+
+function sheetHead(it, o) {
+  const cat = it.t === 'saved' ? o.cat : KIND2CAT[o.kind];
+  let thumb;
+  if (o.kind === 'metro') thumb = `<div class="thumb ph" style="background:${o.line_color};color:#fff">🚇</div>`;
+  else if (o.photo) thumb = `<img class="thumb" src="${o.photo}" alt="">`;
+  else thumb = `<div class="thumb ph">${cat ? CAT[cat].e : (o.kind === 'hotel' ? '🏨' : '📍')}</div>`;
+  let meta, num = '', tags = '';
+  if (it.t === 'stop') {
+    const d = P.days[it.di];
+    const leg = o.mode === 'metro' ? `🚇 метро ≈${o.leg_min} хв` : (it.i && o.leg_m ? `${(o.leg_m / 1000).toFixed(1)} км · ${o.leg_min} хв пішки` : '');
+    meta = `${d.label.split(/[,:]/)[0]} · ${o.arrive}${o.stay ? '–' + o.depart : ''}${leg ? ' · ' + leg : ''}`;
+    num = `<span class="num ${o.fixed ? 'fixed' : ''}" style="background:${o.line_color || d.color}">${o._n}</span>`;
+    if (o.slack_min !== undefined) tags += `<span class="badge ${o.slack_min >= 15 ? 'ok' : 'bad'}">${esc(o.fixed)}: запас ${o.slack_min} хв</span>`;
+    if (o.view) tags += '<span class="src view">👁 здалеку</span>';
+  } else if (it.t === 'saved') {
+    meta = `${CAT[o.cat].l}${o.rating ? ' · ★' + o.rating : ''}${o.price ? ' · ' + o.price : ''}`;
+  } else {
+    meta = it.t === 'opt' ? 'опційно, маршрут не прокладено' : 'по дорозі';
+  }
+  if (o.entry) tags = `<span class="tag ${o.entry.t}">${ENTRY[o.entry.t] || ''}</span>` + tags;
+  tags += srcBadge(it.t === 'saved' ? 'mine' : o.src);
+  return `${thumb}<div class="sh-ti"><div class="t">${esc(meta)}</div>
+    <div class="sh-n">${num}<span>${cat ? CAT[cat].e + ' ' : ''}${esc(o.name)}</span></div>
+    ${tags ? `<div class="sh-tags">${tags}</div>` : ''}</div>`;
+}
+function sheetBody(it, o) {
+  let h = o.photo && o.kind !== 'metro' ? `<img class="sh-big" src="${o.photo}" alt="${esc(o.name)}" loading="lazy">` : '';
+  if (o.view) h += `<div class="viewtxt">👁 Дивимось здалеку: маршрут не підходить до будівлі, її видно з дороги (~${o.view_m} м).</div>`;
+  const desc = it.t === 'stop' ? o.desc : (o.desc || o.note);
+  if (desc) h += `<p class="sh-desc">${esc(desc)}</p>`;
+  h += transitHtml(o.transit) + entryHtml(o.entry, true);  // the entry tag is already in the header
+  if (it.t === 'stop' && o.note) h += `<div class="note">ℹ️ ${esc(o.note)}</div>`;
+  if (it.t === 'saved') h += `<div class="note">Сб: ${esc(o.sat || 'уточнити')} · Нд: ${esc(o.sun || 'уточнити')}</div>
+    <div class="note">${o.near_m} м від маршруту ${o.day.slice(8, 10)}.${o.day.slice(5, 7)}${o.gmaps ? ` · <a href="${o.gmaps}" target="_blank" rel="noopener">Google Maps ↗</a>` : ''}</div>`;
+  if (it.t === 'stop') h += nearList(P.days[it.di], it.di, o.id);
+  return h;
+}
+
+function setSel(m) {
+  if (selMarker) {
+    selMarker.setZIndexOffset(selMarker._z0 || 0);
+    if (selMarker.getElement()) selMarker.getElement().classList.remove('msel');
+  }
+  selMarker = m || null;
+  if (selMarker) {
+    if (selMarker._z0 === undefined) selMarker._z0 = selMarker.options.zIndexOffset || 0;
+    selMarker.setZIndexOffset(2000);
+    if (selMarker.getElement()) selMarker.getElement().classList.add('msel');
+  }
+}
+function setState(st) {
+  shState = st;
+  sheet.style.height = '';
+  if (st !== 'closed') {
+    sheet.style.setProperty('--peek', peekPx() + 'px');
+    sheet.style.setProperty('--full', (peekPx() + shBody.scrollHeight + 12) + 'px');  // full = fit the content
+  }
+  sheet.dataset.state = st;
+  sheet.inert = st === 'closed';
+  shGrab.setAttribute('aria-expanded', String(st === 'full'));
+  if (st !== 'full') shBody.scrollTop = 0;
+}
+// put the point in the middle of the map strip between the top panel and the (peek) sheet
+function centerOn(ll, minZ) {
+  const z = Math.max(map.getZoom(), minZ);
+  const dy = (sheetPeekH() - topH()) / 2;
+  const c = map.unproject(map.project(ll, z).add([0, dy]), z);
+  if (REDUCE) map.setView(c, z, { animate: false });
+  else map.flyTo(c, z, { duration: 0.5 });
+}
+function openSheet(it) {
+  const o = itemObj(it);
+  if (!o) return;
+  cur = it;
+  setFilters(false);
+  shHead.innerHTML = sheetHead(it, o);
+  shBody.innerHTML = sheetBody(it, o);
+  shBody.scrollTop = 0;
+  shGo.innerHTML = navBtn(o.lat, o.lon);
+  const seq = it.t === 'stop' ? routeSeq() : null, pos = seq ? seqPos(seq, it) : -1;
+  shPrev.hidden = shNext.hidden = !seq;
+  if (seq) { shPrev.disabled = pos <= 0; shNext.disabled = pos < 0 || pos >= seq.length - 1; }
+  setSel(itemMarker(it));
+  if (it.t === 'stop') highlightLeg(it.di, it.i); else resetLegs();
+  if (shState === 'closed') { try { history.pushState({ sheet: 1 }, ''); } catch (e) {} }
+  setState(shState === 'full' ? 'full' : 'peek');
+  centerOn(L.latLng(o.lat, o.lon), it.t === 'near' ? 16.5 : 16);
+}
+function closeSheet() {
+  setState('closed');
+  setSel(null);
+  resetLegs();
+  cur = null;
+}
+// close through history so the phone's Back button and the ✕ behave the same
+function dismiss() {
+  if (shState === 'closed') return;
+  if (history.state && history.state.sheet) history.back(); else closeSheet();
+}
+function step(dir) {
+  if (!cur || cur.t !== 'stop') return;
+  const seq = routeSeq(), n = seq[seqPos(seq, cur) + dir];
+  if (n) openSheet(n);
+}
+
+if (PHONE) {
+  try { if (history.state && history.state.sheet) history.replaceState(null, ''); } catch (e) {}  // page reloaded with the sheet open
+  window.addEventListener('popstate', () => { if (shState !== 'closed') closeSheet(); });
+  map.on('click', () => { setFilters(false); dismiss(); });
+  shX.onclick = dismiss;
+  shPrev.onclick = () => step(-1);
+  shNext.onclick = () => step(1);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') dismiss(); });
+  shGrab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setState(shState === 'full' ? 'peek' : 'full'); } });
+  shBody.addEventListener('click', e => {
+    const n = e.target.closest('.nl');
+    if (n) openSheet({ t: 'near', di: +n.dataset.d, k: +n.dataset.k });
+  });
+  // drag the handle / header: tap toggles peek <-> full; a drag snaps to closed, peek or full
+  let drag = null;
+  const down = e => {
+    if (e.button > 0 || shState === 'closed') return;
+    drag = { y: e.clientY, h: sheet.getBoundingClientRect().height, t: performance.now(), moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = e => {
+    if (!drag) return;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved && Math.abs(dy) < 6) return;
+    if (!drag.moved) { drag.moved = true; sheet.classList.add('dragging'); }
+    sheet.style.height = Math.max(40, Math.min(window.innerHeight - 30, drag.h - dy)) + 'px';
+  };
+  const up = e => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    sheet.classList.remove('dragging');
+    if (!d.moved) { setState(shState === 'full' ? 'peek' : 'full'); return; }
+    const v = (e.clientY - d.y) / Math.max(1, performance.now() - d.t);  // px/ms, + is down
+    const h = sheet.getBoundingClientRect().height - v * 180;          // where the flick is heading
+    const peek = sheetPeekH(), full = window.innerHeight * 0.9;
+    const st = h < peek * 0.6 ? 'closed' : (h > (peek + full) / 2 ? 'full' : 'peek');
+    if (st === 'closed') { sheet.style.height = ''; dismiss(); } else setState(st);
+  };
+  [shGrab, shHead].forEach(el => {
+    el.addEventListener('pointerdown', down);
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  });
+  if (window.ResizeObserver) new ResizeObserver(updTop).observe(side);
+  window.addEventListener('resize', () => { updTop(); if (shState !== 'closed') sheet.style.setProperty('--peek', peekPx() + 'px'); });
 }
 
 // ---- my position (GPS)
@@ -463,7 +734,7 @@ function startWatch(center) {
   if (watchId === null) watchId = navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
   else if (meMarker && center) { map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 16)); followOnce = false; }
 }
-const LocCtl = L.Control.extend({ options: { position: 'topleft' }, onAdd() {
+const LocCtl = L.Control.extend({ options: { position: PHONE ? 'topright' : 'topleft' }, onAdd() {
   const b = L.DomUtil.create('button', 'locbtn'); b.type = 'button'; b.textContent = '📍'; b.title = 'Показати, де я';
   L.DomEvent.disableClickPropagation(b); b.onclick = () => startWatch(true); return b;
 } });
@@ -474,11 +745,12 @@ try { navigator.permissions && navigator.permissions.query({ name: 'geolocation'
 function zoomClass() { map.getContainer().classList.toggle('zoomed-out', map.getZoom() < 15); }
 map.on('zoomend', zoomClass);
 const ft = document.getElementById('ftoggle'), fl = document.getElementById('filters');
-function setFilters(open) { fl.hidden = !open; ft.setAttribute('aria-expanded', String(open)); ft.textContent = (open ? '▴ ' : '▾ ') + 'Фільтри й легенда'; }
+function setFilters(open) { fl.hidden = !open; ft.setAttribute('aria-expanded', String(open)); }
 setFilters(!PHONE);
 ft.onclick = () => setFilters(fl.hidden);
 
 render();
+updTop();
 fit();
 zoomClass();
 </script>
