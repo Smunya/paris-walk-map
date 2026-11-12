@@ -109,6 +109,12 @@
   .navbtn { display: inline-block; margin-top: 6px; padding: 5px 11px; border-radius: 999px; background: #1a73e8; color: #fff !important; text-decoration: none; font-size: 12.5px; font-weight: 600; }
   .locbtn { width: 34px; height: 34px; border-radius: 4px; border: 2px solid rgba(0,0,0,.25); background: #fff; font-size: 17px; cursor: pointer; }
   .locbtn.on { background: #e8f0fe; }
+  .locbtn.wait { animation: locpulse 1s ease-in-out infinite alternate; }
+  @keyframes locpulse { from { background: #fff; } to { background: #cfe0fc; } }
+  #toast { position: fixed; z-index: 1300; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+    width: max-content; max-width: min(92vw, 460px); padding: 10px 14px; border-radius: 12px; background: #1f2430; color: #fff;
+    font-size: 13.5px; line-height: 1.4; box-shadow: 0 4px 18px rgba(0,0,0,.3); cursor: pointer; }
+  #toast[hidden] { display: none; }
   .ftoggle { display: none; margin-top: 8px; padding: 4px 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
   .zoomed-out .mlabel { display: none; }
   .filters[hidden] { display: none; }
@@ -740,19 +746,46 @@ function onPos(p) {
     meCircle = L.circle(ll, { radius: p.coords.accuracy, color: '#1a73e8', weight: 1, fillOpacity: 0.12 }).addTo(map);
     meMarker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1 }).addTo(map).bindTooltip('Ви тут');
   } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(p.coords.accuracy); }
-  if (followOnce) { map.setView(ll, Math.max(map.getZoom(), 16)); followOnce = false; }
+  if (followOnce) { map.setView(ll, Math.max(map.getZoom(), 16)); followOnce = false; hideToast(); }
+  locBtn.classList.remove('wait');
   locBtn.classList.add('on');
 }
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function onPosErr(e) {
-  locBtn.classList.remove('on');
-  locBtn.title = e.code === 1 ? 'Доступ до геолокації заборонено в налаштуваннях браузера' : 'Не вдалося визначити позицію';
+  locBtn.classList.remove('on', 'wait');
+  if (e.code === 3 && meMarker) return;  // a late fix only; the last known position stays on the map
+  // stop the watch so the next tap starts a fresh request (before, a failed watch made the button dead)
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if (e.code === 1) {
+    toast(IOS
+      ? 'Геолокацію заборонено. На iPhone: Параметри → Chrome → Геолокація → «Коли використовується». Потім оновіть сторінку й натисніть 📍 ще раз.'
+      : 'Геолокацію заборонено для цього сайту. Натисніть на значок ліворуч від адреси → Дозволи → Місцезнаходження → Дозволити, і натисніть 📍 ще раз.', 12000);
+  } else if (!followOnce) {
+    // background start (permission already granted) failed quietly: do not bother the user
+  } else {
+    toast('Не вдалося визначити, де ви: немає сигналу GPS. Вийдіть ближче до відкритого неба й натисніть 📍 ще раз.', 8000);
+  }
 }
 function startWatch(center) {
-  if (!('geolocation' in navigator)) return;
+  if (!('geolocation' in navigator) || !window.isSecureContext) {
+    if (center) toast('Цей браузер не дає сайту доступ до геолокації.', 6000);
+    return;
+  }
   followOnce = center;
+  if (meMarker && center) { map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 16)); followOnce = false; return; }
+  if (center) { locBtn.classList.add('wait'); toast('Шукаю, де ви… Якщо браузер спитає дозвіл — дозвольте.', 0); }
   if (watchId === null) watchId = navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
-  else if (meMarker && center) { map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 16)); followOnce = false; }
 }
+// small message bar above the bottom sheet; ms = 0 keeps it until replaced or hidden
+let toastTimer = null;
+function toast(msg, ms) {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); t.onclick = hideToast; document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer);
+  if (ms) toastTimer = setTimeout(hideToast, ms);
+}
+function hideToast() { const t = document.getElementById('toast'); if (t) t.hidden = true; clearTimeout(toastTimer); }
 const LocCtl = L.Control.extend({ options: { position: PHONE ? 'topright' : 'topleft' }, onAdd() {
   const b = L.DomUtil.create('button', 'locbtn'); b.type = 'button'; b.textContent = '📍'; b.title = 'Показати, де я';
   L.DomEvent.disableClickPropagation(b); b.onclick = () => startWatch(true); return b;
