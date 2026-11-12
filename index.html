@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Париж: піші маршрути 14–15.11</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #1f2430; --muted: #6b7280; --line: #e7e5e0;
+    --free: #15803d; --paid: #b45309; --closed: #b91c1c; --outside: #6b7280; --food: #7c3aed;
+    --saved: #f59f00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14161b; --panel: #1b1e25; --text: #e7e9ee; --muted: #9aa1ae; --line: #2a2e38;
+            --free: #4ade80; --paid: #fbbf24; --closed: #f87171; --outside: #9aa1ae; --food: #c4b5fd; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #side { width: 440px; max-width: 48vw; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); min-height: 0; }
+  #map { flex: 1; min-width: 0; }
+  header { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 17px; margin: 0 0 8px; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button { flex: 1; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; font: inherit; }
+  .tabs button.on { background: var(--text); color: var(--panel); border-color: var(--text); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+  .stat { background: var(--bg); border-radius: 8px; padding: 6px 8px; }
+  .stat b { display: block; font-size: 15px; }
+  .stat span { color: var(--muted); font-size: 11px; }
+  .filters { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; cursor: pointer; user-select: none; background: var(--panel); color: var(--text); }
+  .chip.off { opacity: .4; text-decoration: line-through; }
+  #list { overflow-y: auto; flex: 1; padding: 4px 0 24px; }
+  .day-head { padding: 12px 16px 4px; font-weight: 650; display: flex; align-items: center; gap: 8px; position: sticky; top: 0; background: var(--panel); z-index: 2; }
+  .day-head i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .card { display: flex; gap: 10px; padding: 9px 16px; cursor: pointer; border-left: 3px solid transparent; }
+  .card:hover, .card.sel { background: var(--bg); }
+  .card.sel { border-left-color: var(--text); }
+  .num { flex: none; width: 24px; height: 24px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
+  .num.fixed { outline: 2px solid var(--text); outline-offset: 1px; }
+  .thumb { flex: none; width: 76px; height: 76px; border-radius: 8px; object-fit: cover; background: var(--bg); }
+  .thumb.ph { display: grid; place-items: center; font-size: 30px; }
+  .body { min-width: 0; flex: 1; }
+  .t { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .n { font-weight: 650; }
+  .desc { font-size: 12.5px; margin-top: 2px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .entry { font-size: 12px; margin-top: 4px; }
+  .tag { display: inline-block; font-size: 10.5px; font-weight: 650; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; margin-right: 5px; white-space: nowrap; }
+  .tag.free { color: var(--free); } .tag.paid { color: var(--paid); } .tag.closed { color: var(--closed); }
+  .tag.outside { color: var(--outside); } .tag.mixed { color: var(--paid); } .tag.food { color: var(--food); }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); margin-left: 6px; font-weight: 500; }
+  .badge.ok { color: var(--free); border-color: var(--free); }
+  .badge.bad { color: var(--closed); border-color: var(--closed); }
+  a { color: inherit; }
+  .pin { width: 26px; height: 26px; border-radius: 50%; color: #fff; font: 700 12px/22px system-ui, sans-serif; text-align: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  .pin.fixed { width: 32px; height: 32px; line-height: 26px; border-width: 3px; border-color: #111; font-size: 13px; }
+  .pin.emo { font-size: 14px; line-height: 22px; }
+  .pin.saved { background: #fff !important; border: 2.5px solid var(--saved); width: 26px; height: 26px; font-size: 13px; line-height: 21px; }
+  .pin.opt { background: #868e96 !important; width: 22px; height: 22px; line-height: 18px; font-size: 11px; border-width: 1.5px; }
+  .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.4; }
+  .pop img { width: 240px; height: 150px; object-fit: cover; border-radius: 6px; display: block; margin-bottom: 6px; }
+  .pop b { font-size: 14px; }
+  .transit { margin-top: 5px; padding: 7px 9px; border-radius: 8px; background: var(--bg); font-size: 12px; }
+  .transit ol { margin: 4px 0 4px 18px; padding: 0; }
+  .transit li { margin: 2px 0; }
+  .pin.near { width: 14px; height: 14px; border-width: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+  .near-list { font-size: 12px; margin-top: 4px; color: var(--muted); }
+  .near-list .nl { color: var(--text); text-decoration: underline dotted; cursor: pointer; }
+  .near-list .nl:hover { text-decoration: underline; }
+  .pw { position: relative; width: 100%; height: 100%; }
+  .pb { position: absolute; top: -7px; right: -7px; width: 15px; height: 15px; border-radius: 50%; color: #fff; font-size: 9px; line-height: 13px; text-align: center; border: 1.5px solid #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+  .pb.mine { background: #f59f00; } .pb.tip { background: #7c3aed; }
+  .pin.nearfood { background: #fff !important; border: 2.5px solid #7c3aed; width: 24px; height: 24px; font-size: 12px; line-height: 19px; }
+  .pin.metro { width: 30px; height: 30px; line-height: 26px; font-size: 13px; border-width: 2.5px; }
+  .pin.metro sub { font-size: 9px; }
+  .mlabel { font-weight: 700; font-size: 12px; }
+  .src { display: inline-block; font-size: 10.5px; font-weight: 650; padding: 1px 7px; border-radius: 999px; margin-left: 6px; color: #fff; white-space: nowrap; vertical-align: 1px; }
+  .src.mine { background: #f59f00; } .src.tip { background: #7c3aed; }
+  .legend { width: 100%; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .legend .src { margin-left: 0; }
+  .pin.view { opacity: .8; border-style: dashed; }
+  .src.view { background: #495057; }
+  .viewtxt { font-size: 12px; margin-top: 3px; color: var(--muted); }
+  .erow { margin-top: 2px; }
+  .navbtn { display: inline-block; margin-top: 6px; padding: 5px 11px; border-radius: 999px; background: #1a73e8; color: #fff !important; text-decoration: none; font-size: 12.5px; font-weight: 600; }
+  .locbtn { width: 34px; height: 34px; border-radius: 4px; border: 2px solid rgba(0,0,0,.25); background: #fff; font-size: 17px; cursor: pointer; }
+  .locbtn.on { background: #e8f0fe; }
+  .foot { padding: 8px 16px; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--line); }
+  @media (max-width: 760px) { body { flex-direction: column-reverse; } #side { width: 100%; max-width: 100vw; height: 52vh; overflow-y: auto; overflow-x: hidden; } #side header, #side .stat, #side .body { min-width: 0; } .stats { grid-template-columns: repeat(2, 1fr); } .tabs button { padding: 7px 4px; } .legend .src { white-space: normal; } #list { overflow: visible; flex: none; } .day-head { position: static; } #map { height: 48vh; flex: none; } }
+</style>
+</head>
+<body>
+<aside id="side">
+  <header>
+    <h1>Париж, піші маршрути</h1>
+    <div class="tabs" id="tabs"></div>
+    <div class="stats" id="stats"></div>
+    <div class="filters" id="filters"></div>
+  </header>
+  <div id="list"></div>
+  <div class="foot">Темп ≈ 4,5 км/год. Кроки = ходьба (1 400/км) + блукання на зупинках. Ціни й години — з відкритих джерел станом на листопад 2026, можуть змінюватися. Фото: Wikipedia.</div>
+</aside>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="data.js"></script>
+<script src="saved.js" onerror="window.SAVED=[]"></script>
+<script>
+const P = window.PARIS;
+const SAVED = window.SAVED || [];
+
+// food / place types -> symbol + label
+const CAT = {
+  brunch:     { e: '🍳', l: 'сніданки / бранч' },
+  coffee:     { e: '☕', l: 'кав\'ярні' },
+  pastry:     { e: '🧁', l: 'кондитерські' },
+  bakery:     { e: '🥐', l: 'пекарні' },
+  restaurant: { e: '🍽️', l: 'ресторани' },
+  market:     { e: '🧺', l: 'ринки й гастрономи' },
+};
+const KIND2CAT = { brunch: 'brunch', cafe: 'coffee', restaurant: 'restaurant', market: 'market', pastry: 'pastry' };
+function transitHtml(tr) {
+  if (!tr) return '';
+  return `<div class="transit"><b>🚇 ${esc(tr.title)}</b><ol>${tr.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol><div>💶 ${esc(tr.price)}</div></div>`;
+}
+const ENTRY = { free: 'Безкоштовно', paid: 'Платно', outside: 'Лише ззовні', closed: 'Зачинено', mixed: 'Частково безкоштовно', food: 'Заклад' };
+
+const map = L.map('map', { zoomControl: true, zoomSnap: 0.25 }).setView([48.855, 2.34], 13);
+// base maps: street map / satellite / hybrid (satellite + street names)
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const esri = (name, extra) => L.tileLayer(ESRI + name + '/MapServer/tile/{z}/{y}/{x}', Object.assign({ attribution: 'Tiles &copy; Esri', maxZoom: 19 }, extra));
+const BASE = {
+  'Карта': esri('World_Street_Map'),
+  'Супутник': esri('World_Imagery'),
+  'Гібрид': L.layerGroup([esri('World_Imagery'), esri('Reference/World_Transportation'), esri('Reference/World_Boundaries_and_Places')]),
+};
+let baseName = 'Карта';
+try { const v = localStorage.getItem('paris-base'); if (v && BASE[v]) baseName = v; } catch (e) {}
+BASE[baseName].addTo(map);
+L.control.layers(BASE, null, { position: 'topright', collapsed: window.innerWidth < 760 }).addTo(map);
+map.on('baselayerchange', e => { try { localStorage.setItem('paris-base', e.name); } catch (err) {} });
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function icon(html, color, cls, size, src) {
+  size = size || 26;
+  const b = src ? `<span class="pb ${src}">${src === 'mine' ? '★' : '◆'}</span>` : '';
+  return L.divIcon({ className: '', html: `<div class="pw"><div class="pin ${cls || ''}" style="background:${color}">${html}</div>${b}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+}
+function srcBadge(src) {
+  if (!src) return '';
+  return `<span class="src ${src}">${src === 'mine' ? '★ ваш список' : '◆ моя порада'}</span>`;
+}
+function stopLabel(s, i) {
+  if (s.kind === 'hotel') return 'H';
+  const c = KIND2CAT[s.kind];
+  return c ? CAT[c].e : String(i);
+}
+function entryHtml(en) {
+  if (!en) return '';
+  if (en.inside === undefined) return `<div class="entry"><span class="tag ${en.t}">${ENTRY[en.t] || ''}</span>${esc(en.txt)}</div>`;
+  return `<div class="entry"><span class="tag ${en.t}">${ENTRY[en.t] || ''}</span>
+    <div class="erow">🚪 <b>Всередину:</b> ${esc(en.inside)}</div>
+    <div class="erow">💶 <b>Вартість:</b> ${esc(en.price)}</div>
+    ${en.how ? `<div class="erow">🎟️ <b>Як купити / примітка:</b> ${esc(en.how)}</div>` : ''}</div>`;
+}
+function extraPopup(o, tag) {
+  return `<div class="pop">${o.photo ? `<img src="${o.photo}" alt="">` : ''}<b>${esc(o.name)}</b>${srcBadge(o.src)}
+    <span style="color:#888"> · ${tag}</span><br>${esc(o.desc || o.note || '')}${entryHtml(o.entry)}<div>${navBtn(o.lat, o.lon)}</div></div>`;
+}
+function navBtn(lat, lon) {
+  const u = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
+  return `<a class="navbtn" href="${u}" target="_blank" rel="noopener">🧭 Вести сюди</a>`;
+}
+function popupHtml(s) {
+  return `<div class="pop">${s.photo ? `<img src="${s.photo}" alt="">` : ''}<b>${esc(s.name)}</b>${srcBadge(s.src)}<br>
+    <span style="color:#888">${s.arrive}${s.stay ? '–' + s.depart : ''}</span><br>${esc(s.desc || '')}${entryHtml(s.entry)}${transitHtml(s.transit)}<div>${navBtn(s.lat, s.lon)}</div></div>`;
+}
+
+// state
+let current = 'all';
+const catOn = Object.fromEntries(Object.keys(CAT).map(k => [k, true]));
+let showSaved = true, showOpt = true, showNear = true;
+
+// layers
+const dayLayers = P.days.map(() => ({ group: L.layerGroup(), legs: [], markers: [], opt: L.layerGroup(), optMarkers: [], near: L.layerGroup(), nearMarkers: [] }));
+P.days.forEach((d, di) => {
+  const Ly = dayLayers[di];
+  let n = 0;
+  d.stops.forEach((s, i) => {
+    if (s.leg_geom && s.mode === 'metro' && s.line_color) {
+      Ly.legs[i] = L.polyline(s.leg_geom, { color: s.line_color, weight: 8, opacity: 0.95 }).addTo(Ly.group);
+      L.polyline(s.leg_geom, { color: '#fff', weight: 2, opacity: 0.9, dashArray: '1 9' }).addTo(Ly.group);
+      (s.stations || []).forEach((nm, k) => {
+        if (k === 0 || k === s.stations.length - 1) return;
+        L.circleMarker(s.leg_geom[k], { radius: 4, color: s.line_color, weight: 2, fillColor: '#fff', fillOpacity: 1 })
+          .bindTooltip(`Ⓜ ${nm}`, { direction: 'right' }).addTo(Ly.group);
+      });
+    } else if (s.leg_geom) {
+      Ly.legs[i] = L.polyline(s.leg_geom, { color: d.color, weight: 5, opacity: 0.85, dashArray: s.mode === 'metro' ? '2 10' : null }).addTo(Ly.group);
+    }
+    if (s.kind === 'via') return;  // routing-only point
+    if (s.kind !== 'hotel' && s.kind !== 'metro') n++;
+    s._n = s.kind === 'hotel' ? 'H' : (s.kind === 'metro' ? 'M' : n);
+    if (s.kind === 'metro') {
+      Ly.markers[i] = L.marker([s.lat, s.lon], { icon: icon(`M<sub>${s.line}</sub>`, s.line_color, 'metro', 30), zIndexOffset: 700 })
+        .bindTooltip(s.name.replace(/^Метро /, 'Ⓜ '), { permanent: true, direction: 'right', offset: [14, 0], className: 'mlabel' })
+        .bindPopup(popupHtml(s), { maxWidth: 270 }).addTo(Ly.group);
+      return;
+    }
+    if (s.view && s.view_pt) {
+      L.polyline([s.view_pt, [s.lat, s.lon]], { color: d.color, weight: 2, opacity: 0.9, dashArray: '2 6' }).addTo(Ly.group);
+      L.circleMarker(s.view_pt, { radius: 3, color: d.color, weight: 2, fillColor: '#fff', fillOpacity: 1 }).addTo(Ly.group);
+    }
+    const lab = KIND2CAT[s.kind] ? CAT[KIND2CAT[s.kind]].e : s._n;
+    const cls = (s.fixed ? 'fixed ' : '') + (KIND2CAT[s.kind] ? 'emo' : '') + (s.view ? ' view' : '');
+    Ly.markers[i] = L.marker([s.lat, s.lon], { icon: icon(lab, d.color, cls, s.fixed ? 32 : 26, s.src), zIndexOffset: s.fixed ? 600 : 300 })
+      .bindPopup(popupHtml(s), { maxWidth: 270 }).addTo(Ly.group);
+  });
+  (d.optional || []).forEach((o, k) => {
+    const c = KIND2CAT[o.kind];
+    Ly.optMarkers[k] = L.marker([o.lat, o.lon], { icon: icon(c ? CAT[c].e : '+', '#868e96', 'opt', 22, o.src) })
+      .bindPopup(extraPopup(o, 'опційно, маршрут не прокладено'), { maxWidth: 270 }).addTo(Ly.opt);
+  });
+  (d.nearby || []).forEach((o, k) => {
+    const c = KIND2CAT[o.kind];
+    const ic = c ? icon(CAT[c].e, '#fff', 'nearfood', 24, o.src) : icon('', d.color, 'near', 14);
+    Ly.nearMarkers[k] = L.marker([o.lat, o.lon], { icon: ic, zIndexOffset: 50 })
+      .bindPopup(extraPopup(o, 'по дорозі'), { maxWidth: 270 }).addTo(Ly.near);
+  });
+});
+const savedMarkers = SAVED.map(p => L.marker([p.lat, p.lon], { icon: icon(CAT[p.cat].e, '#fff', 'saved', 26, 'mine'), zIndexOffset: 100 })
+  .bindPopup(`<b>${CAT[p.cat].e} ${esc(p.name)}</b><br><span style="color:#888">${esc(CAT[p.cat].l)}${p.rating ? ' · ★' + p.rating : ''}${p.price ? ' · ' + esc(p.price) : ''}</span><br>${esc(p.desc)}<br>Сб: ${esc(p.sat || 'уточнити')} · Нд: ${esc(p.sun || 'уточнити')}<br>${p.near_m} м від маршруту ${p.day.slice(8,10)}.${p.day.slice(5,7)} · <a href="${p.gmaps}" target="_blank" rel="noopener">Google Maps ↗</a><div>${navBtn(p.lat, p.lon)}</div>`, { maxWidth: 270 }));
+
+function nearList(d, di, stopId) {
+  if (!showNear) return '';
+  const items = (d.nearby || []).map((o, k) => [o, k]).filter(([o]) => o.at === stopId);
+  if (!items.length) return '';
+  return `<div class="near-list">👀 По дорозі: ${items.map(([o, k]) => `<span class="nl" data-d="${di}" data-k="${k}">${KIND2CAT[o.kind] ? CAT[KIND2CAT[o.kind]].e + ' ' : ''}${esc(o.name)}</span>`).join(' · ')}</div>`;
+}
+function stat(v, l) { return `<div class="stat"><b>${v}</b><span>${l}</span></div>`; }
+
+function renderFilters() {
+  const counts = {};
+  SAVED.forEach(p => counts[p.cat] = (counts[p.cat] || 0) + 1);
+  document.getElementById('filters').innerHTML =
+    Object.entries(CAT).map(([k, c]) => `<span class="chip ${catOn[k] ? '' : 'off'}" data-c="${k}">${c.e} ${c.l}${counts[k] ? ' · ' + counts[k] : ''}</span>`).join('') +
+    `<span class="chip ${showSaved ? '' : 'off'}" data-x="saved">⭐ мої збережені</span>` +
+    `<span class="chip ${showNear ? '' : 'off'}" data-x="near">👀 по дорозі</span>` +
+    `<span class="chip ${showOpt ? '' : 'off'}" data-x="opt">＋ опційні</span>` +
+    `<div class="legend"><span class="src mine">★ ваш список</span> — місця з вашого списку «Париж» у Google Maps · <span class="src tip">◆ моя порада</span> — заклади, які пропоную я · <span class="src view">👁 здалеку</span> — не підходимо, дивимось з маршруту (пунктир — лінія погляду)</div>`;
+  document.querySelectorAll('#filters .chip').forEach(ch => ch.onclick = () => {
+    if (ch.dataset.c) catOn[ch.dataset.c] = !catOn[ch.dataset.c];
+    if (ch.dataset.x === 'saved') showSaved = !showSaved;
+    if (ch.dataset.x === 'opt') showOpt = !showOpt;
+    if (ch.dataset.x === 'near') showNear = !showNear;
+    render();
+  });
+}
+
+function render() {
+  const days = current === 'all' ? P.days.map((_, i) => i) : [current];
+  document.getElementById('tabs').innerHTML =
+    P.days.map((d, i) => `<button data-d="${i}" class="${current === i ? 'on' : ''}">${d.label.split(/[,:]/)[0]}</button>`).join('') +
+    `<button data-d="all" class="${current === 'all' ? 'on' : ''}">Обидва</button>`;
+  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => { current = b.dataset.d === 'all' ? 'all' : +b.dataset.d; render(); fit(); });
+  renderFilters();
+
+  const km = days.reduce((a, i) => a + P.days[i].km, 0);
+  const steps = days.reduce((a, i) => a + P.days[i].steps, 0);
+  const walk = days.reduce((a, i) => a + P.days[i].walk_min, 0);
+  document.getElementById('stats').innerHTML =
+    stat(km.toFixed(1) + ' км', 'пішки') + stat('≈' + Math.round(steps / 1000) + ' тис.', 'кроків') +
+    stat(Math.floor(walk / 60) + ' г ' + (walk % 60) + ' хв', 'у русі') +
+    stat(current === 'all' ? '2 дні' : P.days[current].start + '–' + P.days[current].end, current === 'all' ? '' : 'старт–фініш');
+
+  let html = '';
+  days.forEach(di => {
+    const d = P.days[di];
+    html += `<div class="day-head"><i style="background:${d.color}"></i>${esc(d.label)}</div>`;
+    d.stops.forEach((s, i) => {
+      if (s.kind === 'via') return;
+      const cat = KIND2CAT[s.kind];
+      if (cat && !catOn[cat] && s.kind !== 'restaurant') return; // food stops can be hidden by filter
+      let badge = '';
+      if (s.slack_min !== undefined) badge = `<span class="badge ${s.slack_min >= 15 ? 'ok' : 'bad'}">${s.fixed}: запас ${s.slack_min} хв</span>`;
+      const leg = s.mode === 'metro' ? `🚇 метро ≈${s.leg_min} хв` : (i ? `${(s.leg_m / 1000).toFixed(1)} км · ${s.leg_min} хв пішки` : '');
+      const viewTxt = s.view ? `<div class="viewtxt">👁 Дивимось здалеку: маршрут не підходить до будівлі, її видно з дороги (~${s.view_m} м).</div>` : '';
+      const thumb = (s.kind === 'transit' || s.kind === 'metro') ? `<div class="thumb ph" style="background:${s.line_color || 'var(--bg)'};color:#fff">🚇</div>` : s.photo ? `<img class="thumb" loading="lazy" src="${s.photo}" alt="">`
+        : `<div class="thumb ph">${cat ? CAT[cat].e : (s.kind === 'hotel' ? '🏨' : '📍')}</div>`;
+      html += `<div class="card" data-d="${di}" data-i="${i}">
+        <div class="num ${s.fixed ? 'fixed' : ''}" style="background:${s.line_color || d.color}">${s._n}</div>
+        ${thumb}
+        <div class="body">
+          <div class="t">${s.arrive}${s.stay ? '–' + s.depart : ''}${leg ? ' · ' + leg : ''}</div>
+          <div class="n">${cat ? CAT[cat].e + ' ' : ''}${esc(s.name)}${badge}${srcBadge(s.src)}${s.view ? '<span class="src view">👁 здалеку</span>' : ''}</div>
+          ${viewTxt}
+          ${s.desc ? `<div class="desc">${esc(s.desc)}</div>` : ''}
+          ${transitHtml(s.transit)}
+          ${entryHtml(s.entry)}
+          ${s.note ? `<div class="note">ℹ️ ${esc(s.note)}</div>` : ''}
+          ${nearList(d, di, s.id)}
+          ${s.kind !== 'metro' ? navBtn(s.lat, s.lon) : ''}
+        </div></div>`;
+    });
+  });
+  days.forEach(di => {
+    const d = P.days[di];
+    if (!showOpt || !(d.optional || []).length) return;
+    html += `<div class="day-head"><i style="background:#868e96"></i>Опційно поруч (${esc(d.label.split(/[,:]/)[0])}) — маршрут не прокладено</div>`;
+    d.optional.forEach((o, k) => {
+      const c = KIND2CAT[o.kind];
+      const thumb = o.photo ? `<img class="thumb" loading="lazy" src="${o.photo}" alt="" style="width:56px;height:56px">`
+        : `<div class="thumb ph" style="width:56px;height:56px;font-size:24px">${c ? CAT[c].e : '＋'}</div>`;
+      html += `<div class="card op" data-d="${di}" data-k="${k}">${thumb}<div class="body"><div class="n">${esc(o.name)}${srcBadge(o.src)}</div>
+        <div class="desc">${esc(o.desc || o.note || '')}</div>${entryHtml(o.entry)}</div></div>`;
+    });
+  });
+  if (showSaved && SAVED.length) {
+    html += `<div class="day-head"><i style="background:var(--saved)"></i>Мої збережені («Париж»), за відстанню до маршруту</div>`;
+    SAVED.forEach((p, k) => {
+      if (!catOn[p.cat]) return;
+      html += `<div class="card sv" data-k="${k}"><div class="thumb ph" style="width:44px;height:44px;font-size:22px">${CAT[p.cat].e}</div><div class="body">
+        <div class="n">${esc(p.name)}${srcBadge('mine')}</div>
+        <div class="t">${esc(CAT[p.cat].l)}${p.rating ? ' · ★' + p.rating : ''}${p.price ? ' · ' + esc(p.price) : ''} · ${p.near_m} м від маршруту ${p.day.slice(8,10)}.${p.day.slice(5,7)}</div>
+        <div class="desc">${esc(p.desc)}</div>
+        <div class="note">Сб: ${esc(p.sat || 'уточнити')} · Нд: ${esc(p.sun || 'уточнити')} · <a href="${p.gmaps}" target="_blank" rel="noopener">Google Maps ↗</a></div>
+      </div></div>`;
+    });
+  }
+  document.getElementById('list').innerHTML = html;
+  document.querySelectorAll('.card:not(.sv):not(.op)').forEach(el => el.onclick = e => { if (e.target.closest('a')) return; focusStop(+el.dataset.d, +el.dataset.i, el); });
+  document.querySelectorAll('.card.op').forEach(el => el.onclick = () => {
+    const m = dayLayers[+el.dataset.d].optMarkers[+el.dataset.k];
+    map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 16), { duration: 0.6 });
+    m.openPopup();
+  });
+  document.querySelectorAll('.nl').forEach(a => a.onclick = e => {
+    e.stopPropagation();
+    const m = dayLayers[+a.dataset.d].nearMarkers[+a.dataset.k];
+    map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 16.5), { duration: 0.6 });
+    m.openPopup();
+  });
+  document.querySelectorAll('.card.sv').forEach(el => el.onclick = e => {
+    if (e.target.tagName === 'A') return;
+    const m = savedMarkers[+el.dataset.k];
+    map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 16), { duration: 0.6 });
+    m.openPopup();
+  });
+
+  P.days.forEach((_, i) => {
+    [dayLayers[i].group, dayLayers[i].opt, dayLayers[i].near].forEach(g => map.removeLayer(g));
+    if (days.includes(i)) {
+      dayLayers[i].group.addTo(map);
+      if (showOpt) dayLayers[i].opt.addTo(map);
+      if (showNear) dayLayers[i].near.addTo(map);
+    }
+  });
+  savedMarkers.forEach((m, k) => {
+    const on = showSaved && catOn[SAVED[k].cat];
+    if (on && !map.hasLayer(m)) m.addTo(map);
+    if (!on && map.hasLayer(m)) map.removeLayer(m);
+  });
+}
+
+function focusStop(di, i, el) {
+  document.querySelectorAll('.card.sel').forEach(e => e.classList.remove('sel'));
+  el.classList.add('sel');
+  dayLayers.forEach(l => l.legs.forEach(x => x && x.setStyle({ weight: 5, opacity: 0.85 })));
+  const leg = dayLayers[di].legs[i];
+  if (leg) { leg.setStyle({ weight: 8, opacity: 1 }); leg.bringToFront(); }
+  const m = dayLayers[di].markers[i];
+  map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 15.5), { duration: 0.6 });
+  m.openPopup();
+}
+
+function fit() {
+  const days = current === 'all' ? P.days : [P.days[current]];
+  const pts = days.flatMap(d => d.stops.map(s => [s.lat, s.lon]));
+  map.invalidateSize();
+  map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+}
+
+// ---- my position (GPS)
+let meMarker = null, meCircle = null, watchId = null, followOnce = false;
+function onPos(p) {
+  const ll = [p.coords.latitude, p.coords.longitude];
+  if (!meMarker) {
+    meCircle = L.circle(ll, { radius: p.coords.accuracy, color: '#1a73e8', weight: 1, fillOpacity: 0.12 }).addTo(map);
+    meMarker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#1a73e8', fillOpacity: 1 }).addTo(map).bindTooltip('Ви тут');
+  } else { meMarker.setLatLng(ll); meCircle.setLatLng(ll).setRadius(p.coords.accuracy); }
+  if (followOnce) { map.setView(ll, Math.max(map.getZoom(), 16)); followOnce = false; }
+  locBtn.classList.add('on');
+}
+function onPosErr(e) {
+  locBtn.classList.remove('on');
+  locBtn.title = e.code === 1 ? 'Доступ до геолокації заборонено в налаштуваннях браузера' : 'Не вдалося визначити позицію';
+}
+function startWatch(center) {
+  if (!('geolocation' in navigator)) return;
+  followOnce = center;
+  if (watchId === null) watchId = navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  else if (meMarker && center) { map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 16)); followOnce = false; }
+}
+const LocCtl = L.Control.extend({ options: { position: 'topleft' }, onAdd() {
+  const b = L.DomUtil.create('button', 'locbtn'); b.type = 'button'; b.textContent = '📍'; b.title = 'Показати, де я';
+  L.DomEvent.disableClickPropagation(b); b.onclick = () => startWatch(true); return b;
+} });
+map.addControl(new LocCtl());
+const locBtn = document.querySelector('.locbtn');
+try { navigator.permissions && navigator.permissions.query({ name: 'geolocation' }).then(r => { if (r.state === 'granted') startWatch(false); }); } catch (e) {}
+
+render();
+fit();
+</script>
+</body>
+</html>
