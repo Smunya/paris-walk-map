@@ -102,6 +102,9 @@
     .leaflet-popup-content { max-width: 240px; }
     .pop img { width: 220px; height: 120px; }
   }
+  @keyframes flashbg { from { background: #fff3bf; } to { background: transparent; } }
+  .flash { animation: flashbg 1.6s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .flash { animation: none; outline: 2px solid #f59f00; } }
   .foot { padding: 8px 16px; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--line); }
   @media (max-width: 760px) { body { flex-direction: column-reverse; } #side { width: 100%; max-width: 100vw; height: 52vh; overflow-y: auto; overflow-x: hidden; } #side header, #side .stat, #side .body { min-width: 0; } .stats { grid-template-columns: repeat(2, 1fr); } .tabs button { padding: 7px 4px; } .legend .src { white-space: normal; } #list { overflow: visible; flex: none; } .day-head { position: static; } #map { height: 48vh; flex: none; } }
 </style>
@@ -232,7 +235,7 @@ P.days.forEach((d, di) => {
     if (s.kind === 'metro') {
       Ly.markers[i] = L.marker([s.lat, s.lon], { icon: icon(`M<sub>${s.line}</sub>`, s.line_color, 'metro', 30), zIndexOffset: 700 })
         .bindTooltip(s.name.replace(/^Метро /, 'Ⓜ '), { permanent: true, direction: 'right', offset: [14, 0], className: 'mlabel' })
-        .bindPopup(popupHtml(s), { maxWidth: 270 }).addTo(Ly.group);
+        .bindPopup(popupHtml(s), { maxWidth: 270 }).on('click', () => selectCard(di, i)).addTo(Ly.group);
       return;
     }
     if (s.view && s.view_pt) {
@@ -242,23 +245,24 @@ P.days.forEach((d, di) => {
     const lab = KIND2CAT[s.kind] ? CAT[KIND2CAT[s.kind]].e : s._n;
     const cls = (s.fixed ? 'fixed ' : '') + (KIND2CAT[s.kind] ? 'emo' : '') + (s.view ? ' view' : '');
     Ly.markers[i] = L.marker([s.lat, s.lon], { icon: icon(lab, d.color, cls, s.fixed ? 32 : 26, s.src), zIndexOffset: s.fixed ? 600 : 300 })
-      .bindPopup(popupHtml(s), { maxWidth: 270 }).addTo(Ly.group);
+      .bindPopup(popupHtml(s), { maxWidth: 270 }).on('click', () => selectCard(di, i)).addTo(Ly.group);
   });
   (d.optional || []).forEach((o, k) => {
     const c = KIND2CAT[o.kind];
     Ly.optMarkers[k] = L.marker([o.lat, o.lon], { icon: icon(c ? CAT[c].e : '+', '#868e96', 'opt', 22, o.src) })
-      .bindPopup(extraPopup(o, 'опційно, маршрут не прокладено'), { maxWidth: 270 }).addTo(Ly.opt);
+      .bindPopup(extraPopup(o, 'опційно, маршрут не прокладено'), { maxWidth: 270 }).on('click', () => revealCard(`.card.op[data-d="${di}"][data-k="${k}"]`)).addTo(Ly.opt);
   });
   (d.nearby || []).forEach((o, k) => {
     const c = KIND2CAT[o.kind];
     const ic = c ? icon(CAT[c].e, '#fff', 'nearfood', 24, o.src) : icon('', d.color, 'near', 14);
     Ly.nearMarkers[k] = L.marker([o.lat, o.lon], { icon: ic, zIndexOffset: 50 })
-      .bindPopup(extraPopup(o, 'по дорозі'), { maxWidth: 270 }).addTo(Ly.near);
+      .bindPopup(extraPopup(o, 'по дорозі'), { maxWidth: 270 }).on('click', () => revealCard(`.nl[data-d="${di}"][data-k="${k}"]`)).addTo(Ly.near);
   });
 });
 const savedMarkers = SAVED.map(p => L.marker([p.lat, p.lon], { icon: icon(CAT[p.cat].e, '#fff', 'saved', 26, 'mine'), zIndexOffset: 100 })
   .bindPopup(`<b>${CAT[p.cat].e} ${esc(p.name)}</b><br><span style="color:#888">${esc(CAT[p.cat].l)}${p.rating ? ' · ★' + p.rating : ''}${p.price ? ' · ' + esc(p.price) : ''}</span><br>${esc(p.desc)}<br>Сб: ${esc(p.sat || 'уточнити')} · Нд: ${esc(p.sun || 'уточнити')}<br>${p.near_m} м від маршруту ${p.day.slice(8,10)}.${p.day.slice(5,7)} · <a href="${p.gmaps}" target="_blank" rel="noopener">Google Maps ↗</a><div>${navBtn(p.lat, p.lon)}</div>`, { maxWidth: 270 }));
 
+savedMarkers.forEach((m, k) => m.on('click', () => revealCard(`.card.sv[data-k="${k}"]`)));
 function nearList(d, di, stopId) {
   if (!showNear) return '';
   const items = (d.nearby || []).map((o, k) => [o, k]).filter(([o]) => o.at === stopId);
@@ -390,12 +394,42 @@ function render() {
   });
 }
 
+// ---- map -> list: scroll the list to the card of a clicked marker
+function scrollListTo(el) {
+  const box = PHONE ? document.getElementById('side') : document.getElementById('list');
+  const head = PHONE ? document.querySelector('#side header').offsetHeight : 0;
+  const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - head - 8;
+  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  box.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
+}
+function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+function highlightLeg(di, i) {
+  dayLayers.forEach((l, dj) => l.legs.forEach((x, j) => x && P.days[dj].stops[j].mode !== 'metro' && x.setStyle({ weight: 5, opacity: 0.85 })));
+  const leg = dayLayers[di].legs[i];
+  if (leg && P.days[di].stops[i].mode !== 'metro') { leg.setStyle({ weight: 8, opacity: 1 }); leg.bringToFront(); }
+}
+function selectCard(di, i) {
+  const el = document.querySelector(`.card[data-d="${di}"][data-i="${i}"]`);
+  if (!el) return;
+  document.querySelectorAll('.card.sel').forEach(e => e.classList.remove('sel'));
+  el.classList.add('sel');
+  highlightLeg(di, i);
+  scrollListTo(el);
+  flash(el);
+}
+function revealCard(sel) {
+  const el = document.querySelector(sel);
+  if (!el) return;
+  const card = el.closest('.card') || el;
+  document.querySelectorAll('.card.sel').forEach(e => e.classList.remove('sel'));
+  card.classList.add('sel');
+  scrollListTo(card);
+  flash(el);
+}
 function focusStop(di, i, el) {
   document.querySelectorAll('.card.sel').forEach(e => e.classList.remove('sel'));
   el.classList.add('sel');
-  dayLayers.forEach(l => l.legs.forEach(x => x && x.setStyle({ weight: 5, opacity: 0.85 })));
-  const leg = dayLayers[di].legs[i];
-  if (leg) { leg.setStyle({ weight: 8, opacity: 1 }); leg.bringToFront(); }
+  highlightLeg(di, i);
   const m = dayLayers[di].markers[i];
   map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 15.5), { duration: 0.6 });
   m.openPopup();
